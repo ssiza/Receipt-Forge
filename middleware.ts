@@ -27,9 +27,9 @@ export async function middleware(request: NextRequest) {
           expires: expiresInOneDay.toISOString()
         }),
         httpOnly: true,
-        secure: false, // Set to false for development to work with HTTP
-        sameSite: 'lax', // Use 'lax' for better compatibility
-        path: '/', // Ensure cookie is sent with all requests
+        secure: process.env.NODE_ENV === 'production', // Secure in production
+        sameSite: 'lax',
+        path: '/',
         expires: expiresInOneDay
       });
     } catch (error) {

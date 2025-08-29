@@ -48,7 +48,7 @@ export async function setAuthToken(token: string): Promise<void> {
   cookieStore.set('auth_token', token, {
     expires: expiresInOneDay,
     httpOnly: true,
-    secure: false, // Set to false for development
+    secure: process.env.NODE_ENV === 'production', // Secure in production
     sameSite: 'lax',
     path: '/',
   });

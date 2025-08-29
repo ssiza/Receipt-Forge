@@ -7,55 +7,54 @@ import { verifyAuthToken, getAuthToken } from '@/lib/auth/token-auth';
 
 export async function getUser() {
   try {
-    // First try the new token-based auth
-    const authToken = await getAuthToken();
-    if (authToken) {
-      const tokenPayload = await verifyAuthToken(authToken);
-      if (tokenPayload && tokenPayload.exp > Math.floor(Date.now() / 1000)) {
-        const user = await db
-          .select()
-          .from(users)
-          .where(and(eq(users.id, tokenPayload.userId), isNull(users.deletedAt)))
-          .limit(1);
+    // Try session-based auth first (more reliable)
+    const sessionCookie = (await cookies()).get('session');
+    if (sessionCookie && sessionCookie.value) {
+      try {
+        const sessionData = await verifyToken(sessionCookie.value);
+        if (
+          sessionData &&
+          sessionData.user &&
+          typeof sessionData.user.id === 'number' &&
+          new Date(sessionData.expires) > new Date()
+        ) {
+          const user = await db
+            .select()
+            .from(users)
+            .where(and(eq(users.id, sessionData.user.id), isNull(users.deletedAt)))
+            .limit(1);
 
-        if (user.length > 0) {
-          console.log('User authenticated via token:', user[0].email);
-          return user[0];
+          if (user.length > 0) {
+            return user[0];
+          }
         }
+      } catch (sessionError) {
+        console.error('Session verification failed:', sessionError);
       }
     }
 
-    // Fallback to session-based auth
-    const sessionCookie = (await cookies()).get('session');
-    if (!sessionCookie || !sessionCookie.value) {
-      return null;
+    // Fallback to token-based auth
+    const authToken = await getAuthToken();
+    if (authToken) {
+      try {
+        const tokenPayload = await verifyAuthToken(authToken);
+        if (tokenPayload && tokenPayload.exp > Math.floor(Date.now() / 1000)) {
+          const user = await db
+            .select()
+            .from(users)
+            .where(and(eq(users.id, tokenPayload.userId), isNull(users.deletedAt)))
+            .limit(1);
+
+          if (user.length > 0) {
+            return user[0];
+          }
+        }
+      } catch (tokenError) {
+        console.error('Token verification failed:', tokenError);
+      }
     }
 
-    const sessionData = await verifyToken(sessionCookie.value);
-    if (
-      !sessionData ||
-      !sessionData.user ||
-      typeof sessionData.user.id !== 'number'
-    ) {
-      return null;
-    }
-
-    if (new Date(sessionData.expires) < new Date()) {
-      return null;
-    }
-
-    const user = await db
-      .select()
-      .from(users)
-      .where(and(eq(users.id, sessionData.user.id), isNull(users.deletedAt)))
-      .limit(1);
-
-    if (user.length === 0) {
-      return null;
-    }
-
-    console.log('User authenticated via session:', user[0].email);
-    return user[0];
+    return null;
   } catch (error) {
     console.error('Error in getUser:', error);
     return null;

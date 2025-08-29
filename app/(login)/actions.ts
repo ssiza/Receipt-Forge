@@ -86,18 +86,25 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
     };
   }
 
-  // Create both session and token for better cross-browser compatibility
-  const authToken = await createAuthToken(foundUser);
-  
-  await Promise.all([
-    setSession(foundUser),
-    setAuthToken(authToken),
-    logActivity(foundTeam?.id, foundUser.id, ActivityType.SIGN_IN)
-  ]);
+  try {
+    // Create both session and token for better cross-browser compatibility
+    const authToken = await createAuthToken(foundUser);
+    
+    await Promise.all([
+      setSession(foundUser),
+      setAuthToken(authToken),
+      logActivity(foundTeam?.id, foundUser.id, ActivityType.SIGN_IN)
+    ]);
 
-
-
-  redirect('/dashboard');
+    redirect('/dashboard');
+  } catch (error) {
+    console.error('Error during sign in:', error);
+    return {
+      error: 'Authentication failed. Please try again.',
+      email,
+      password
+    };
+  }
 });
 
 const signUpSchema = z.object({
@@ -206,19 +213,26 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
     role: userRole
   };
 
-  // Create both session and token for better cross-browser compatibility
-  const authToken = await createAuthToken(createdUser);
-  
-  await Promise.all([
-    db.insert(teamMembers).values(newTeamMember),
-    logActivity(teamId, createdUser.id, ActivityType.SIGN_UP),
-    setSession(createdUser),
-    setAuthToken(authToken)
-  ]);
+  try {
+    // Create both session and token for better cross-browser compatibility
+    const authToken = await createAuthToken(createdUser);
+    
+    await Promise.all([
+      db.insert(teamMembers).values(newTeamMember),
+      logActivity(teamId, createdUser.id, ActivityType.SIGN_UP),
+      setSession(createdUser),
+      setAuthToken(authToken)
+    ]);
 
-
-
-  redirect('/dashboard');
+    redirect('/dashboard');
+  } catch (error) {
+    console.error('Error during sign up:', error);
+    return {
+      error: 'Account creation failed. Please try again.',
+      email,
+      password
+    };
+  }
 });
 
 export async function signOut() {

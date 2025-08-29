@@ -34,6 +34,9 @@ export default function RootLayout({
               // Only components that read this data will suspend
               '/api/user': getUser(),
               '/api/team': getTeamForUser()
+            },
+            onError: (error) => {
+              console.error('SWR Error:', error);
             }
           }}
         >

@@ -51,12 +51,12 @@ export async function setSession(user: NewUser) {
   };
   const encryptedSession = await signToken(session);
   
-  // Simplified cookie settings for better cross-browser compatibility
+  // Cookie settings optimized for production
   (await cookies()).set('session', encryptedSession, {
     expires: expiresInOneDay,
     httpOnly: true,
-    secure: false, // Set to false for development to work with HTTP
-    sameSite: 'lax', // Use 'lax' for better compatibility
-    path: '/', // Ensure cookie is sent with all requests
+    secure: process.env.NODE_ENV === 'production', // Secure in production
+    sameSite: 'lax',
+    path: '/',
   });
 }
