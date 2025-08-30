@@ -1,32 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentMonthUsage, getTeamForUser } from '@/lib/db/queries';
 import { log } from '@/lib/logger';
+import { createServerSupabaseClient } from '@/lib/supabaseClient';
 
 async function getAuthenticatedTeam(request: NextRequest) {
   try {
-    // First try the new token-based auth
-    const authToken = request.headers.get('authorization')?.replace('Bearer ', '');
-    if (authToken) {
-      const { verifyAuthToken } = await import('@/lib/auth/token-auth');
-      const tokenPayload = await verifyAuthToken(authToken);
-      if (tokenPayload && tokenPayload.exp > Math.floor(Date.now() / 1000)) {
-        const { getUserWithTeam } = await import('@/lib/db/queries');
-        const userWithTeam = await getUserWithTeam(tokenPayload.userId);
-        if (userWithTeam?.teamId) {
-          const { getTeamForUser } = await import('@/lib/db/queries');
-          const team = await getTeamForUser();
-          if (team) {
-            console.log('User authenticated via token:', userWithTeam.user.email);
-            return team;
-          }
-        }
-      }
+    // Use Supabase authentication
+    const supabase = await createServerSupabaseClient();
+    const { data: { user }, error } = await supabase.auth.getUser();
+    
+    if (error || !user) {
+      console.log('User not authenticated via Supabase');
+      return null;
     }
 
-    // Fallback to session-based auth
+    // Get team for authenticated user
     const team = await getTeamForUser();
     if (team) {
-      console.log('User authenticated via session');
+      console.log('User authenticated via Supabase:', user.email);
       return team;
     }
 
