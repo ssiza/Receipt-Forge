@@ -74,6 +74,8 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
       };
     }
 
+    console.log('Signing in user with Supabase Auth ID:', authData.user.id);
+    
     // Get user from our database
     const user = await db
       .select()
@@ -82,12 +84,36 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
       .limit(1);
 
     if (user.length === 0) {
+      console.error('User not found in database for auth_user_id:', authData.user.id);
+      
+      // Check if user exists by email but has no auth_user_id
+      const userByEmail = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, email))
+        .limit(1);
+      
+      if (userByEmail.length > 0) {
+        console.error('User exists by email but has no auth_user_id. This suggests a sign-up issue.');
+        return {
+          error: 'Account setup incomplete. Please try signing up again.',
+          email,
+          password
+        };
+      }
+      
       return {
         error: 'User not found in database. Please contact support.',
         email,
         password
       };
     }
+
+    console.log('User found in database:', {
+      uuidId: user[0].uuidId,
+      authUserId: user[0].authUserId,
+      email: user[0].email
+    });
 
     // Log activity
     const userWithTeam = await getUserWithTeam(user[0].uuidId);
@@ -135,7 +161,8 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       email,
       password,
       options: {
-        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+        emailConfirm: false // Disable email confirmation for development
       }
     });
 
@@ -157,6 +184,12 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       };
     }
 
+    console.log('Supabase Auth user created successfully:', {
+      id: authData.user.id,
+      email: authData.user.email,
+      emailConfirmed: authData.user.email_confirmed_at
+    });
+
     // Create user in our database
     const newUser: NewUser = {
       authUserId: authData.user.id,
@@ -164,6 +197,7 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       role: 'owner' // Default role, will be overridden if there's an invitation
     };
 
+    console.log('Creating user in database with auth_user_id:', authData.user.id);
     const [createdUser] = await db.insert(users).values(newUser).returning();
 
     if (!createdUser) {
@@ -174,6 +208,12 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
         password
       };
     }
+
+    console.log('User created in database successfully:', {
+      uuidId: createdUser.uuidId,
+      authUserId: createdUser.authUserId,
+      email: createdUser.email
+    });
 
     let teamId: number;
     let userRole: string;
