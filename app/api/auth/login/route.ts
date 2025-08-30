@@ -3,19 +3,19 @@ import { createServerSupabaseClient } from '@/lib/supabaseClient';
 import { db } from '@/lib/db/drizzle';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { z } from 'zod';
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string(),
-});
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { email, password } = loginSchema.parse(body);
-    
-    const supabase = createServerSupabaseClient();
+    const { email, password } = await request.json();
+
+    if (!email || !password) {
+      return NextResponse.json(
+        { success: false, error: 'Email and password are required' },
+        { status: 400 }
+      );
+    }
+
+    const supabase = await createServerSupabaseClient();
 
     // Step 1: Sign in with Supabase Auth ONLY
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -24,25 +24,19 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      console.error('Supabase Auth login error:', error);
+      console.error('Supabase login error:', error);
       return NextResponse.json(
-        { error: 'Invalid email or password. Please try again.' },
+        { success: false, error: error.message },
         { status: 401 }
       );
     }
 
     if (!data.user) {
-      console.error('No user data returned from Supabase Auth');
       return NextResponse.json(
-        { error: 'Authentication failed. Please try again.' },
+        { success: false, error: 'Login failed' },
         { status: 401 }
       );
     }
-
-    console.log('Supabase Auth login successful:', {
-      id: data.user.id,
-      email: data.user.email
-    });
 
     // Step 2: Fetch profile from database using auth_user_id
     const user = await db
@@ -52,18 +46,11 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     if (user.length === 0) {
-      console.error('User profile not found in database for auth_user_id:', data.user.id);
       return NextResponse.json(
-        { error: 'User profile not found. Please contact support.' },
+        { success: false, error: 'User not found in database. Please contact support.' },
         { status: 404 }
       );
     }
-
-    console.log('User profile found in database:', {
-      id: user[0].id,
-      authUserId: user[0].authUserId,
-      email: user[0].email
-    });
 
     return NextResponse.json({
       success: true,
@@ -76,9 +63,9 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('Error in login:', error);
     return NextResponse.json(
-      { error: 'Authentication failed. Please try again.' },
+      { success: false, error: 'Login failed. Please try again.' },
       { status: 500 }
     );
   }

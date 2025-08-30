@@ -3,20 +3,18 @@ import { createServerSupabaseClient } from '@/lib/supabaseClient';
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
 
     // Sign out with Supabase Auth ONLY
     const { error } = await supabase.auth.signOut();
 
     if (error) {
-      console.error('Supabase Auth logout error:', error);
+      console.error('Supabase logout error:', error);
       return NextResponse.json(
-        { error: 'Logout failed. Please try again.' },
+        { success: false, error: error.message },
         { status: 500 }
       );
     }
-
-    console.log('Supabase Auth logout successful');
 
     return NextResponse.json({
       success: true,
@@ -24,9 +22,9 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
-    console.error('Logout error:', error);
+    console.error('Error in logout:', error);
     return NextResponse.json(
-      { error: 'Logout failed. Please try again.' },
+      { success: false, error: 'Logout failed. Please try again.' },
       { status: 500 }
     );
   }

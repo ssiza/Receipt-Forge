@@ -6,7 +6,7 @@ import { eq, isNull } from 'drizzle-orm';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
 
     // Get current user from Supabase Auth
     const { data: { user }, error } = await supabase.auth.getUser();

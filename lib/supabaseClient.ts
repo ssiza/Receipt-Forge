@@ -16,12 +16,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // Server-side client (for API routes and server components)
-export const createServerSupabaseClient = () => {
+export const createServerSupabaseClient = async () => {
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error('Supabase environment variables are not configured. Please add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to your .env.local file');
   }
   
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   
   return createServerClient(
     supabaseUrl,
@@ -87,7 +87,7 @@ export const supabase = supabaseUrl && supabaseAnonKey
 
 // Helper function to get current user
 export async function getCurrentUser() {
-  const supabase = createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   const { data: { user }, error } = await supabase.auth.getUser();
   
   if (error) {
@@ -100,7 +100,7 @@ export async function getCurrentUser() {
 
 // Helper function to get current session
 export async function getCurrentSession() {
-  const supabase = createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   const { data: { session }, error } = await supabase.auth.getSession();
   
   if (error) {
