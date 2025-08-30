@@ -11,7 +11,8 @@
     "db:studio": "drizzle-kit studio",
     "deploy:setup": "node scripts/deploy-setup.js",
     "migrate:supabase-auth": "npx tsx scripts/migrate-to-supabase-auth.ts",
-    "fix:existing-users": "npx tsx scripts/fix-existing-users.ts"
+    "fix:existing-users": "npx tsx scripts/fix-existing-users.ts",
+    "migrate:users-to-auth": "npx tsx scripts/migrate-users-to-supabase-auth.ts"
   },
   "dependencies": {
     "@radix-ui/react-select": "^2.2.6",

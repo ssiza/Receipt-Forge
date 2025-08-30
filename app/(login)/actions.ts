@@ -141,7 +141,7 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
   const supabase = createServerSupabaseClient();
 
   try {
-    // Check if user already exists in our database
+    // Check if user already exists in our database (simpler check)
     const existingUser = await db
       .select()
       .from(users)
@@ -156,7 +156,7 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       };
     }
 
-    // Sign up with Supabase Auth
+    // Sign up with Supabase Auth (this is the single source of truth)
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
@@ -190,10 +190,10 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       emailConfirmed: authData.user.email_confirmed_at
     });
 
-    // Create user in our database
+    // Now create the corresponding row in public.users
     const newUser: NewUser = {
       authUserId: authData.user.id,
-      email,
+      email: authData.user.email!,
       role: 'owner' // Default role, will be overridden if there's an invitation
     };
 
