@@ -14,9 +14,8 @@ import {
 import { relations, sql } from 'drizzle-orm';
 
 export const users = pgTable('users', {
-  uuidId: uuid('uuid_id').primaryKey().defaultRandom(),
-  id: serial('id'), // Legacy ID, kept for migration
-  authUserId: uuid('auth_user_id').unique(), // Links to Supabase Auth
+  id: uuid('id').primaryKey().defaultRandom(),
+  authUserId: uuid('auth_user_id').unique().notNull(), // References auth.users(id)
   name: varchar('name', { length: 100 }),
   email: varchar('email', { length: 255 }).notNull().unique(),
   role: varchar('role', { length: 20 }).notNull().default('member'),
@@ -36,8 +35,7 @@ export const teams = pgTable('teams', {
 
 export const teamMembers = pgTable('team_members', {
   id: serial('id').primaryKey(),
-  userId: integer('user_id'), // Legacy reference, kept for migration
-  userUuidId: uuid('user_uuid_id').references(() => users.uuidId), // New UUID reference
+  userId: uuid('user_id').references(() => users.id).notNull(),
   teamId: integer('team_id')
     .notNull()
     .references(() => teams.id),
@@ -50,8 +48,7 @@ export const activityLogs = pgTable('activity_logs', {
   teamId: integer('team_id')
     .notNull()
     .references(() => teams.id),
-  userId: integer('user_id'), // Legacy reference, kept for migration
-  userUuidId: uuid('user_uuid_id').references(() => users.uuidId), // New UUID reference
+  userId: uuid('user_id').references(() => users.id),
   action: text('action').notNull(),
   timestamp: timestamp('timestamp').notNull().defaultNow(),
   ipAddress: varchar('ip_address', { length: 45 }),
@@ -64,8 +61,7 @@ export const invitations = pgTable('invitations', {
     .references(() => teams.id),
   email: varchar('email', { length: 255 }).notNull(),
   role: varchar('role', { length: 50 }).notNull(),
-  invitedBy: integer('invited_by'), // Legacy reference, kept for migration
-  invitedByUuidId: uuid('invited_by_uuid_id').references(() => users.uuidId), // New UUID reference
+  invitedById: uuid('invited_by_id').references(() => users.id),
   invitedAt: timestamp('invited_at').notNull().defaultNow(),
   status: varchar('status', { length: 20 }).notNull().default('pending'),
 });
@@ -170,15 +166,15 @@ export const invitationsRelations = relations(invitations, ({ one }) => ({
     references: [teams.id],
   }),
   invitedBy: one(users, {
-    fields: [invitations.invitedByUuidId],
-    references: [users.uuidId],
+    fields: [invitations.invitedById],
+    references: [users.id],
   }),
 }));
 
 export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
   user: one(users, {
-    fields: [teamMembers.userUuidId],
-    references: [users.uuidId],
+    fields: [teamMembers.userId],
+    references: [users.id],
   }),
   team: one(teams, {
     fields: [teamMembers.teamId],
@@ -192,8 +188,8 @@ export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
     references: [teams.id],
   }),
   user: one(users, {
-    fields: [activityLogs.userUuidId],
-    references: [users.uuidId],
+    fields: [activityLogs.userId],
+    references: [users.id],
   }),
 }));
 

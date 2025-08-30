@@ -31,15 +31,15 @@ export async function getUser() {
 
 
 
-export async function getUserWithTeam(userUuidId: string) {
+export async function getUserWithTeam(userId: string) {
   const result = await db
     .select({
       user: users,
       teamId: teamMembers.teamId
     })
     .from(users)
-    .leftJoin(teamMembers, eq(users.uuidId, teamMembers.userUuidId))
-    .where(eq(users.uuidId, userUuidId))
+    .leftJoin(teamMembers, eq(users.id, teamMembers.userId))
+    .where(eq(users.id, userId))
     .limit(1);
 
   return result[0];

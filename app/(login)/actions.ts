@@ -26,7 +26,7 @@ import {
 
 async function logActivity(
   teamId: number | null | undefined,
-  userUuidId: string,
+  userId: string,
   type: ActivityType,
   ipAddress?: string
 ) {
@@ -35,7 +35,7 @@ async function logActivity(
   }
   const newActivity: NewActivityLog = {
     teamId,
-    userUuidId,
+    userId,
     action: type,
     ipAddress: ipAddress || ''
   };
@@ -52,7 +52,7 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
   const supabase = createServerSupabaseClient();
 
   try {
-    // Sign in with Supabase Auth
+    // Step 1: Sign in with Supabase Auth ONLY
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
       email,
       password
@@ -74,9 +74,12 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
       };
     }
 
-    console.log('Signing in user with Supabase Auth ID:', authData.user.id);
-    
-    // Get user from our database
+    console.log('Supabase Auth sign-in successful:', {
+      id: authData.user.id,
+      email: authData.user.email
+    });
+
+    // Step 2: Fetch user from database using auth_user_id
     const user = await db
       .select()
       .from(users)
@@ -85,39 +88,22 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
 
     if (user.length === 0) {
       console.error('User not found in database for auth_user_id:', authData.user.id);
-      
-      // Check if user exists by email but has no auth_user_id
-      const userByEmail = await db
-        .select()
-        .from(users)
-        .where(eq(users.email, email))
-        .limit(1);
-      
-      if (userByEmail.length > 0) {
-        console.error('User exists by email but has no auth_user_id. This suggests a sign-up issue.');
-        return {
-          error: 'Account setup incomplete. Please try signing up again.',
-          email,
-          password
-        };
-      }
-      
       return {
-        error: 'User not found in database. Please contact support.',
+        error: 'User profile not found. Please contact support.',
         email,
         password
       };
     }
 
-    console.log('User found in database:', {
-      uuidId: user[0].uuidId,
+    console.log('User profile found in database:', {
+      id: user[0].id,
       authUserId: user[0].authUserId,
       email: user[0].email
     });
 
-    // Log activity
-    const userWithTeam = await getUserWithTeam(user[0].uuidId);
-    await logActivity(userWithTeam?.teamId, user[0].uuidId, ActivityType.SIGN_IN);
+    // Step 3: Log activity
+    const userWithTeam = await getUserWithTeam(user[0].id);
+    await logActivity(userWithTeam?.teamId, user[0].id, ActivityType.SIGN_IN);
 
     redirect('/dashboard');
   } catch (error) {
@@ -141,22 +127,7 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
   const supabase = createServerSupabaseClient();
 
   try {
-    // Check if user already exists in our database (simpler check)
-    const existingUser = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, email))
-      .limit(1);
-
-    if (existingUser.length > 0) {
-      return {
-        error: 'User already exists. Please try signing in instead.',
-        email,
-        password
-      };
-    }
-
-    // Sign up with Supabase Auth (this is the single source of truth)
+    // Step 1: Sign up with Supabase Auth ONLY (single source of truth)
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
@@ -186,35 +157,34 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
 
     console.log('Supabase Auth user created successfully:', {
       id: authData.user.id,
-      email: authData.user.email,
-      emailConfirmed: authData.user.email_confirmed_at
+      email: authData.user.email
     });
 
-    // Now create the corresponding row in public.users
+    // Step 2: Create corresponding row in public.users with auth_user_id
     const newUser: NewUser = {
       authUserId: authData.user.id,
       email: authData.user.email!,
       role: 'owner' // Default role, will be overridden if there's an invitation
     };
 
-    console.log('Creating user in database with auth_user_id:', authData.user.id);
     const [createdUser] = await db.insert(users).values(newUser).returning();
 
     if (!createdUser) {
       console.error('Failed to create user in database');
       return {
-        error: 'Failed to create user. Please try again.',
+        error: 'Failed to create user profile. Please try again.',
         email,
         password
       };
     }
 
-    console.log('User created in database successfully:', {
-      uuidId: createdUser.uuidId,
+    console.log('User profile created in database:', {
+      id: createdUser.id,
       authUserId: createdUser.authUserId,
       email: createdUser.email
     });
 
+    // Step 3: Handle team creation/joining
     let teamId: number;
     let userRole: string;
     let createdTeam: typeof teams.$inferSelect | null = null;
@@ -242,7 +212,7 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
           .set({ status: 'accepted' })
           .where(eq(invitations.id, invitation.id));
 
-        await logActivity(teamId, createdUser.uuidId, ActivityType.ACCEPT_INVITATION);
+        await logActivity(teamId, createdUser.id, ActivityType.ACCEPT_INVITATION);
 
         [createdTeam] = await db
           .select()
@@ -271,18 +241,19 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       teamId = createdTeam.id;
       userRole = 'owner';
 
-      await logActivity(teamId, createdUser.uuidId, ActivityType.CREATE_TEAM);
+      await logActivity(teamId, createdUser.id, ActivityType.CREATE_TEAM);
     }
 
+    // Step 4: Create team membership
     const newTeamMember: NewTeamMember = {
-      userUuidId: createdUser.uuidId,
+      userId: createdUser.id,
       teamId: teamId,
       role: userRole
     };
 
     await Promise.all([
       db.insert(teamMembers).values(newTeamMember),
-      logActivity(teamId, createdUser.uuidId, ActivityType.SIGN_UP)
+      logActivity(teamId, createdUser.id, ActivityType.SIGN_UP)
     ]);
 
     redirect('/dashboard');
