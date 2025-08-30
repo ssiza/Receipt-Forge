@@ -1,8 +1,6 @@
-const fetch = require('node-fetch');
-
 // Configuration
 const LOCAL_URL = 'http://localhost:3000';
-const PROD_URL = 'https://receipt-forge-o2wr2ls9v-ssizaa.vercel.app';
+const PROD_URL = 'https://receipt-forge-c0b5jzn9u-ssizaa.vercel.app';
 const TEST_EMAIL = `test-consistency-${Date.now()}@example.com`;
 const TEST_PASSWORD = 'testpassword123';
 const TEST_NAME = 'Test Consistency User';

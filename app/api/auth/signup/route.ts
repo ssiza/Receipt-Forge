@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabaseClient';
+import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabaseClient';
 import { db } from '@/lib/db/drizzle';
 import { users } from '@/lib/db/schema';
 import { log } from '@/lib/logger';
@@ -48,21 +48,7 @@ export async function POST(request: NextRequest) {
 
     log.info(`Supabase Auth user created successfully for ${email} with ID: ${data.user.id}`);
 
-    // Step 2: Verify the user exists in Supabase Auth before creating profile
-    log.info(`Verifying user exists in Supabase Auth: ${data.user.id}`);
-    const { data: verifyData, error: verifyError } = await supabase.auth.admin.getUserById(data.user.id);
-    
-    if (verifyError || !verifyData.user) {
-      log.error(`Failed to verify user in Supabase Auth: ${data.user.id}`, verifyError);
-      return NextResponse.json(
-        { success: false, error: 'User verification failed' },
-        { status: 500 }
-      );
-    }
-
-    log.info(`User verified in Supabase Auth: ${data.user.id}`);
-
-    // Step 3: Create profile row in public.users with auth_user_id
+    // Step 2: Create profile row in public.users with auth_user_id
     try {
       log.info(`Creating profile in database for user: ${data.user.id}`);
       const newUser = {
@@ -92,7 +78,8 @@ export async function POST(request: NextRequest) {
       // If database insert fails, we should clean up the Supabase Auth user
       log.info(`Cleaning up Supabase Auth user after database failure: ${data.user.id}`);
       try {
-        await supabase.auth.admin.deleteUser(data.user.id);
+        const adminSupabase = createAdminSupabaseClient();
+        await adminSupabase.auth.admin.deleteUser(data.user.id);
         log.info(`Successfully cleaned up Supabase Auth user: ${data.user.id}`);
       } catch (cleanupError) {
         log.error(`Failed to cleanup Supabase Auth user: ${data.user.id}`, cleanupError);
