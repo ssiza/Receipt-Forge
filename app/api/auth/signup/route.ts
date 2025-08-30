@@ -21,8 +21,7 @@ export async function POST(request: NextRequest) {
       email,
       password,
       options: { 
-        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
-        emailConfirm: false // For development - remove in production
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
       }
     });
 
