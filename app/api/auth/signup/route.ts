@@ -2,21 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabaseClient';
 import { db } from '@/lib/db/drizzle';
 import { users } from '@/lib/db/schema';
+import { log } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   try {
     const { email, password, name } = await request.json();
 
     if (!email || !password) {
+      log.error('Signup attempt with missing email or password');
       return NextResponse.json(
         { success: false, error: 'Email and password are required' },
         { status: 400 }
       );
     }
 
+    log.info(`Starting signup process for email: ${email}`);
+
     const supabase = await createServerSupabaseClient();
 
     // Step 1: Sign up with Supabase Auth ONLY
+    log.info(`Creating user in Supabase Auth for email: ${email}`);
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -26,7 +31,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      console.error('Supabase signup error:', error);
+      log.error(`Supabase signup error for ${email}:`, error);
       return NextResponse.json(
         { success: false, error: error.message },
         { status: 400 }
@@ -34,14 +39,32 @@ export async function POST(request: NextRequest) {
     }
 
     if (!data.user) {
+      log.error(`No user data returned from Supabase Auth for ${email}`);
       return NextResponse.json(
         { success: false, error: 'User creation failed' },
         { status: 500 }
       );
     }
 
-    // Step 2: Create profile row in public.users with auth_user_id
+    log.info(`Supabase Auth user created successfully for ${email} with ID: ${data.user.id}`);
+
+    // Step 2: Verify the user exists in Supabase Auth before creating profile
+    log.info(`Verifying user exists in Supabase Auth: ${data.user.id}`);
+    const { data: verifyData, error: verifyError } = await supabase.auth.admin.getUserById(data.user.id);
+    
+    if (verifyError || !verifyData.user) {
+      log.error(`Failed to verify user in Supabase Auth: ${data.user.id}`, verifyError);
+      return NextResponse.json(
+        { success: false, error: 'User verification failed' },
+        { status: 500 }
+      );
+    }
+
+    log.info(`User verified in Supabase Auth: ${data.user.id}`);
+
+    // Step 3: Create profile row in public.users with auth_user_id
     try {
+      log.info(`Creating profile in database for user: ${data.user.id}`);
       const newUser = {
         authUserId: data.user.id,
         email: data.user.email!,
@@ -50,6 +73,8 @@ export async function POST(request: NextRequest) {
       };
 
       const [createdUser] = await db.insert(users).values(newUser).returning();
+
+      log.info(`Profile created successfully in database for user: ${data.user.id}`);
 
       return NextResponse.json({
         success: true,
@@ -62,13 +87,15 @@ export async function POST(request: NextRequest) {
       });
 
     } catch (dbError) {
-      console.error('Database error during user creation:', dbError);
+      log.error(`Database error during user creation for ${data.user.id}:`, dbError);
       
       // If database insert fails, we should clean up the Supabase Auth user
+      log.info(`Cleaning up Supabase Auth user after database failure: ${data.user.id}`);
       try {
         await supabase.auth.admin.deleteUser(data.user.id);
+        log.info(`Successfully cleaned up Supabase Auth user: ${data.user.id}`);
       } catch (cleanupError) {
-        console.error('Failed to cleanup Supabase Auth user:', cleanupError);
+        log.error(`Failed to cleanup Supabase Auth user: ${data.user.id}`, cleanupError);
       }
 
       return NextResponse.json(
@@ -78,7 +105,7 @@ export async function POST(request: NextRequest) {
     }
 
   } catch (error) {
-    console.error('Error in signup:', error);
+    log.error('Unexpected error in signup:', error);
     return NextResponse.json(
       { success: false, error: 'Account creation failed. Please try again.' },
       { status: 500 }
