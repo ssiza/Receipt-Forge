@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import Link from 'next/link';
 import { use, useState, Suspense } from 'react';
 import { Button } from '@/components/ui/button';
@@ -11,22 +12,56 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { signOut } from '@/app/(login)/actions';
 import { useRouter } from 'next/navigation';
-import { User } from '@/lib/db/schema';
-import useSWR, { mutate } from 'swr';
+import { useAuth } from '@/lib/hooks/useAuth';
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+interface User {
+  id: string;
+  email: string;
+  name?: string;
+  role: string;
+}
 
 function UserMenu() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const { data: user } = useSWR<User>('/api/user', fetcher);
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const { logout } = useAuth();
   const router = useRouter();
 
+  // Check authentication on mount
+  React.useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const response = await fetch('/api/auth/me');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            setUser(data.user);
+          }
+        }
+      } catch (error) {
+        console.error('Auth check failed:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
   async function handleSignOut() {
-    await signOut();
-    mutate('/api/user');
+    await logout();
+    setUser(null);
     router.push('/');
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center space-x-4">
+        <div className="animate-pulse bg-gray-200 h-9 w-20 rounded"></div>
+      </div>
+    );
   }
 
   if (!user) {
@@ -52,6 +87,7 @@ function UserMenu() {
           <AvatarImage alt={user.name || ''} />
           <AvatarFallback>
             {user.email
+              .split('@')[0]
               .split(' ')
               .map((n) => n[0])
               .join('')}
@@ -65,14 +101,13 @@ function UserMenu() {
             <span>Dashboard</span>
           </Link>
         </DropdownMenuItem>
-        <form action={handleSignOut} className="w-full">
-          <button type="submit" className="flex w-full">
-            <DropdownMenuItem className="w-full flex-1 cursor-pointer">
-              <LogOut className="mr-2 h-4 w-4" />
-              <span>Sign out</span>
-            </DropdownMenuItem>
-          </button>
-        </form>
+        <DropdownMenuItem 
+          className="w-full flex-1 cursor-pointer"
+          onClick={handleSignOut}
+        >
+          <LogOut className="mr-2 h-4 w-4" />
+          <span>Sign out</span>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

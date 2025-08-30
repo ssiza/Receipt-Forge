@@ -1,12 +1,10 @@
 'use client';
 
-import { useActionState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Loader2, User, Palette, Upload, CheckCircle } from 'lucide-react';
-import { updateAccount } from '@/app/(login)/actions';
 import { User as UserType } from '@/lib/db/schema';
 import useSWR from 'swr';
 import { Suspense, useState, useEffect } from 'react';
@@ -26,12 +24,6 @@ const fetcher = async (url: string) => {
   }
 };
 
-type ActionState = {
-  name?: string;
-  error?: string;
-  success?: string;
-};
-
 interface ReceiptPreferences {
   businessName?: string;
   businessAddress?: string;
@@ -44,58 +36,155 @@ interface ReceiptPreferences {
 }
 
 type AccountFormProps = {
-  state: ActionState;
   nameValue?: string;
   emailValue?: string;
 };
 
 function AccountForm({
-  state,
   nameValue = '',
   emailValue = ''
 }: AccountFormProps) {
+  const [name, setName] = useState(nameValue);
+  const [email, setEmail] = useState(emailValue);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    setName(nameValue);
+    setEmail(emailValue);
+  }, [nameValue, emailValue]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setMessage(null);
+    
+    try {
+      const response = await fetch('/api/user', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, email }),
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        setMessage({ type: 'success', text: 'Account updated successfully!' });
+      } else {
+        setMessage({ type: 'error', text: result.error || 'Failed to update account' });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'An error occurred while updating account' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <div className="space-y-2">
-        <Label htmlFor="name" className="text-sm font-medium text-gray-700">
-          Name
-        </Label>
-        <Input
-          id="name"
-          name="name"
-          placeholder="Enter your name"
-          defaultValue={state.name || nameValue}
-          className="rounded-xl border-gray-200 focus:border-green-500 focus:ring-green-500"
-          required
-        />
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-2">
+          <Label htmlFor="name" className="text-sm font-medium text-gray-700">
+            Name
+          </Label>
+          <Input
+            id="name"
+            name="name"
+            placeholder="Enter your name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="rounded-xl border-gray-200 focus:border-green-500 focus:ring-green-500"
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="email" className="text-sm font-medium text-gray-700">
+            Email
+          </Label>
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            placeholder="Enter your email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="rounded-xl border-gray-200 focus:border-green-500 focus:ring-green-500"
+            required
+          />
+        </div>
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="email" className="text-sm font-medium text-gray-700">
-          Email
-        </Label>
-        <Input
-          id="email"
-          name="email"
-          type="email"
-          placeholder="Enter your email"
-          defaultValue={emailValue}
-          className="rounded-xl border-gray-200 focus:border-green-500 focus:ring-green-500"
-          required
-        />
-      </div>
+
+      <AnimatePresence>
+        {message && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className={`flex items-center gap-2 p-3 rounded-xl ${
+              message.type === 'success' 
+                ? 'bg-green-50 text-green-700 border border-green-200' 
+                : 'bg-red-50 text-red-700 border border-red-200'
+            }`}
+          >
+            <CheckCircle className="w-4 h-4" />
+            <span className="text-sm font-medium">{message.text}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <motion.div
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+      >
+        <Button
+          type="button"
+          onClick={handleSave}
+          className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200"
+          disabled={isSaving}
+        >
+          {isSaving ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            'Save Account Changes'
+          )}
+        </Button>
+      </motion.div>
     </div>
   );
 }
 
-function AccountFormWithData({ state }: { state: ActionState }) {
+function AccountFormWithData() {
   const { data: user, error: userError } = useSWR<UserType>('/api/user', fetcher, {
     onError: (err) => {
       console.warn('Failed to fetch user data:', err);
     }
   });
+
+  if (userError) {
+    return (
+      <div className="text-red-600 text-sm bg-red-50 p-3 rounded-xl border border-red-200">
+        Failed to load user data. Please try refreshing the page.
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="animate-pulse">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="h-10 bg-gray-200 rounded-xl"></div>
+          <div className="h-10 bg-gray-200 rounded-xl"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <AccountForm
-      state={state}
       nameValue={user?.name ?? ''}
       emailValue={user?.email ?? ''}
     />
@@ -452,11 +541,6 @@ function ReceiptPreferencesForm() {
 }
 
 export default function GeneralPage() {
-  const [state, formAction, isPending] = useActionState<ActionState, FormData>(
-    updateAccount,
-    {}
-  );
-
   return (
     <div className="space-y-8">
       <motion.div
@@ -489,52 +573,9 @@ export default function GeneralPage() {
               </div>
             </div>
             <div className="p-6">
-              <form className="space-y-6" action={formAction}>
-                <Suspense fallback={<AccountForm state={state} />}>
-                  <AccountFormWithData state={state} />
-                </Suspense>
-                <AnimatePresence>
-                  {state.error && (
-                    <motion.p
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="text-red-600 text-sm bg-red-50 p-3 rounded-xl border border-red-200"
-                    >
-                      {state.error}
-                    </motion.p>
-                  )}
-                  {state.success && (
-                    <motion.p
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      className="text-green-600 text-sm bg-green-50 p-3 rounded-xl border border-green-200"
-                    >
-                      {state.success}
-                    </motion.p>
-                  )}
-                </AnimatePresence>
-                <motion.div
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  <Button
-                    type="submit"
-                    className="bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200"
-                    disabled={isPending}
-                  >
-                    {isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      'Save Account Changes'
-                    )}
-                  </Button>
-                </motion.div>
-              </form>
+              <Suspense fallback={<div className="animate-pulse">Loading...</div>}>
+                <AccountFormWithData />
+              </Suspense>
             </div>
           </div>
         </motion.div>

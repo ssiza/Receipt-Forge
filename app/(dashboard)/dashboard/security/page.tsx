@@ -5,34 +5,86 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Lock, Trash2, Loader2, Shield, AlertTriangle, CheckCircle, AlertCircle } from 'lucide-react';
-import { useActionState } from 'react';
-import { updatePassword, deleteAccount } from '@/app/(login)/actions';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-
-type PasswordState = {
-  currentPassword?: string;
-  newPassword?: string;
-  confirmPassword?: string;
-  error?: string;
-  success?: string;
-};
-
-type DeleteState = {
-  password?: string;
-  error?: string;
-  success?: string;
-};
+import { useAuth } from '@/lib/hooks/useAuth';
 
 export default function SecurityPage() {
-  const [passwordState, passwordAction, isPasswordPending] = useActionState<
-    PasswordState,
-    FormData
-  >(updatePassword, {});
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [passwordMessage, setPasswordMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isPasswordLoading, setIsPasswordLoading] = useState(false);
+  const [isDeleteLoading, setIsDeleteLoading] = useState(false);
+  const { logout } = useAuth();
 
-  const [deleteState, deleteAction, isDeletePending] = useActionState<
-    DeleteState,
-    FormData
-  >(deleteAccount, {});
+  const handlePasswordUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsPasswordLoading(true);
+    setPasswordMessage(null);
+
+    if (newPassword !== confirmPassword) {
+      setPasswordMessage({ type: 'error', text: 'New passwords do not match' });
+      setIsPasswordLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/update-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        setPasswordMessage({ type: 'success', text: 'Password updated successfully!' });
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } else {
+        setPasswordMessage({ type: 'error', text: result.error || 'Failed to update password' });
+      }
+    } catch (error) {
+      setPasswordMessage({ type: 'error', text: 'An error occurred while updating password' });
+    } finally {
+      setIsPasswordLoading(false);
+    }
+  };
+
+  const handleAccountDelete = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsDeleteLoading(true);
+    setDeleteMessage(null);
+
+    try {
+      const response = await fetch('/api/auth/delete-account', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password: deletePassword }),
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        setDeleteMessage({ type: 'success', text: 'Account deleted successfully!' });
+        await logout();
+      } else {
+        setDeleteMessage({ type: 'error', text: result.error || 'Failed to delete account' });
+      }
+    } catch (error) {
+      setDeleteMessage({ type: 'error', text: 'An error occurred while deleting account' });
+    } finally {
+      setIsDeleteLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -63,7 +115,7 @@ export default function SecurityPage() {
           </div>
         </div>
         <div className="p-6">
-          <form className="space-y-4" action={passwordAction}>
+          <form className="space-y-4" onSubmit={handlePasswordUpdate}>
             <div className="space-y-2">
               <Label htmlFor="current-password" className="text-sm font-medium text-gray-700">
                 Current Password
@@ -76,7 +128,8 @@ export default function SecurityPage() {
                 required
                 minLength={8}
                 maxLength={100}
-                defaultValue={passwordState.currentPassword}
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
                 className="rounded-xl border-gray-200 focus:border-purple-500 focus:ring-purple-500"
               />
             </div>
@@ -92,7 +145,8 @@ export default function SecurityPage() {
                 required
                 minLength={8}
                 maxLength={100}
-                defaultValue={passwordState.newPassword}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
                 className="rounded-xl border-gray-200 focus:border-purple-500 focus:ring-purple-500"
               />
             </div>
@@ -104,58 +158,50 @@ export default function SecurityPage() {
                 id="confirm-password"
                 name="confirmPassword"
                 type="password"
+                autoComplete="new-password"
                 required
                 minLength={8}
                 maxLength={100}
-                defaultValue={passwordState.confirmPassword}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 className="rounded-xl border-gray-200 focus:border-purple-500 focus:ring-purple-500"
               />
             </div>
-            
+
             <AnimatePresence>
-              {passwordState.error && (
+              {passwordMessage && (
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl"
+                  className={`flex items-center gap-2 p-3 rounded-xl ${
+                    passwordMessage.type === 'success' 
+                      ? 'bg-green-50 text-green-700 border border-green-200' 
+                      : 'bg-red-50 text-red-700 border border-red-200'
+                  }`}
                 >
-                  <AlertCircle className="w-4 h-4 text-red-600" />
-                  <p className="text-sm text-red-700 font-medium">{passwordState.error}</p>
-                </motion.div>
-              )}
-              {passwordState.success && (
-                <motion.div
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-xl"
-                >
-                  <CheckCircle className="w-4 h-4 text-green-600" />
-                  <p className="text-sm text-green-700 font-medium">{passwordState.success}</p>
+                  <CheckCircle className="w-4 h-4" />
+                  <span className="text-sm font-medium">{passwordMessage.text}</span>
                 </motion.div>
               )}
             </AnimatePresence>
-            
+
             <motion.div
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
               <Button
                 type="submit"
-                className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-200"
-                disabled={isPasswordPending}
+                className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200"
+                disabled={isPasswordLoading}
               >
-                {isPasswordPending ? (
+                {isPasswordLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Updating...
                   </>
                 ) : (
-                  <>
-                    <Lock className="mr-2 h-4 w-4" />
-                    Update Password
-                  </>
+                  'Update Password'
                 )}
               </Button>
             </motion.div>
@@ -177,22 +223,24 @@ export default function SecurityPage() {
             </div>
             <div>
               <h2 className="text-xl font-semibold text-white">Delete Account</h2>
-              <p className="text-red-100 text-sm">Permanently delete your account and data</p>
+              <p className="text-red-100 text-sm">Permanently delete your account and all data</p>
             </div>
           </div>
         </div>
         <div className="p-6">
-          <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl mb-6">
-            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-red-800 mb-1">Warning</p>
-              <p className="text-sm text-red-700">
-                Account deletion is permanent and cannot be undone. All your data, receipts, and settings will be permanently removed.
-              </p>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <h3 className="text-sm font-semibold text-red-800">Warning</h3>
+                <p className="text-sm text-red-700 mt-1">
+                  This action cannot be undone. This will permanently delete your account and remove all your data from our servers.
+                </p>
+              </div>
             </div>
           </div>
-          
-          <form action={deleteAction} className="space-y-4">
+
+          <form className="space-y-4" onSubmit={handleAccountDelete}>
             <div className="space-y-2">
               <Label htmlFor="delete-password" className="text-sm font-medium text-gray-700">
                 Confirm Password
@@ -201,49 +249,49 @@ export default function SecurityPage() {
                 id="delete-password"
                 name="password"
                 type="password"
+                autoComplete="current-password"
                 required
-                minLength={8}
-                maxLength={100}
-                defaultValue={deleteState.password}
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
                 className="rounded-xl border-gray-200 focus:border-red-500 focus:ring-red-500"
                 placeholder="Enter your password to confirm"
               />
             </div>
-            
+
             <AnimatePresence>
-              {deleteState.error && (
+              {deleteMessage && (
                 <motion.div
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl"
+                  className={`flex items-center gap-2 p-3 rounded-xl ${
+                    deleteMessage.type === 'success' 
+                      ? 'bg-green-50 text-green-700 border border-green-200' 
+                      : 'bg-red-50 text-red-700 border border-red-200'
+                  }`}
                 >
-                  <AlertCircle className="w-4 h-4 text-red-600" />
-                  <p className="text-sm text-red-700 font-medium">{deleteState.error}</p>
+                  <CheckCircle className="w-4 h-4" />
+                  <span className="text-sm font-medium">{deleteMessage.text}</span>
                 </motion.div>
               )}
             </AnimatePresence>
-            
+
             <motion.div
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
               <Button
                 type="submit"
-                variant="destructive"
-                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-200"
-                disabled={isDeletePending}
+                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200"
+                disabled={isDeleteLoading}
               >
-                {isDeletePending ? (
+                {isDeleteLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Deleting...
                   </>
                 ) : (
-                  <>
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Delete Account
-                  </>
+                  'Delete Account'
                 )}
               </Button>
             </motion.div>
