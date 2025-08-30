@@ -115,8 +115,6 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
   const supabase = createServerSupabaseClient();
 
   try {
-    console.log('Starting sign-up process for:', email);
-    
     // Check if user already exists in our database
     const existingUser = await db
       .select()
@@ -125,7 +123,6 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       .limit(1);
 
     if (existingUser.length > 0) {
-      console.log('User already exists in database:', email);
       return {
         error: 'User already exists. Please try signing in instead.',
         email,
@@ -133,7 +130,6 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       };
     }
 
-    console.log('Creating user in Supabase Auth...');
     // Sign up with Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
@@ -161,8 +157,6 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       };
     }
 
-    console.log('Supabase Auth user created:', authData.user.id);
-
     // Create user in our database
     const newUser: NewUser = {
       authUserId: authData.user.id,
@@ -170,7 +164,6 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       role: 'owner' // Default role, will be overridden if there's an invitation
     };
 
-    console.log('Creating user in database with data:', newUser);
     const [createdUser] = await db.insert(users).values(newUser).returning();
 
     if (!createdUser) {
@@ -182,14 +175,11 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       };
     }
 
-    console.log('User created in database:', createdUser);
-
     let teamId: number;
     let userRole: string;
     let createdTeam: typeof teams.$inferSelect | null = null;
 
     if (inviteId) {
-      console.log('Processing invitation:', inviteId);
       // Check if there's a valid invitation
       const [invitation] = await db
         .select()
@@ -220,11 +210,9 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
           .where(eq(teams.id, teamId))
           .limit(1);
       } else {
-        console.error('Invalid invitation:', inviteId);
         return { error: 'Invalid or expired invitation.', email, password };
       }
     } else {
-      console.log('Creating new team for user');
       // Create a new team if there's no invitation
       const newTeam: NewTeam = {
         name: `${email}'s Team`
@@ -233,7 +221,6 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       [createdTeam] = await db.insert(teams).values(newTeam).returning();
 
       if (!createdTeam) {
-        console.error('Failed to create team');
         return {
           error: 'Failed to create team. Please try again.',
           email,
@@ -247,7 +234,6 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       await logActivity(teamId, createdUser.uuidId, ActivityType.CREATE_TEAM);
     }
 
-    console.log('Creating team member relationship');
     const newTeamMember: NewTeamMember = {
       userUuidId: createdUser.uuidId,
       teamId: teamId,
@@ -259,7 +245,6 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       logActivity(teamId, createdUser.uuidId, ActivityType.SIGN_UP)
     ]);
 
-    console.log('Sign-up completed successfully, redirecting to dashboard');
     redirect('/dashboard');
   } catch (error) {
     console.error('Error during sign up:', error);
