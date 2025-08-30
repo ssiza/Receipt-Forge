@@ -2,17 +2,30 @@ import { createClient } from '@supabase/supabase-js';
 import { createServerClient, createBrowserClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+// Validate environment variables
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase environment variables:');
+  console.error('- NEXT_PUBLIC_SUPABASE_URL:', supabaseUrl ? 'SET' : 'MISSING');
+  console.error('- NEXT_PUBLIC_SUPABASE_ANON_KEY:', supabaseAnonKey ? 'SET' : 'MISSING');
+  console.error('Please add these to your .env.local file');
+  console.error('Get them from: https://supabase.com/dashboard/project/_/settings/api');
+}
 
 // Server-side client (for API routes and server components)
 export const createServerSupabaseClient = () => {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Supabase environment variables are not configured. Please add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to your .env.local file');
+  }
+  
   const cookieStore = cookies();
   
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         get(name: string) {
@@ -43,14 +56,22 @@ export const createServerSupabaseClient = () => {
 
 // Client-side client (for client components)
 export const createClientSupabaseClient = () => {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Supabase environment variables are not configured. Please add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to your .env.local file');
+  }
+  
   return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    supabaseUrl,
+    supabaseAnonKey
   );
 };
 
 // Admin client (for migrations and admin operations)
 export const createAdminSupabaseClient = () => {
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error('Supabase environment variables are not configured. Please add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to your .env.local file');
+  }
+  
   return createClient(supabaseUrl, supabaseServiceKey, {
     auth: {
       autoRefreshToken: false,
@@ -60,7 +81,9 @@ export const createAdminSupabaseClient = () => {
 };
 
 // Direct client (for direct database access)
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = supabaseUrl && supabaseAnonKey 
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 // Helper function to get current user
 export async function getCurrentUser() {
