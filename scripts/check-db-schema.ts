@@ -19,8 +19,8 @@ async function checkDatabaseSchema() {
     `);
 
     console.log('Users table columns:');
-    if (usersColumns.rows) {
-      usersColumns.rows.forEach((row: any) => {
+    if (usersColumns && Array.isArray(usersColumns)) {
+      usersColumns.forEach((row: any) => {
         console.log(`  - ${row.column_name}: ${row.data_type} (nullable: ${row.is_nullable})`);
       });
     } else {
@@ -28,11 +28,11 @@ async function checkDatabaseSchema() {
     }
 
     console.log('\nChecking if uuid_id column exists...');
-    const hasUuidId = usersColumns.rows ? usersColumns.rows.some((row: any) => row.column_name === 'uuid_id') : false;
+    const hasUuidId = usersColumns && Array.isArray(usersColumns) ? usersColumns.some((row: any) => row.column_name === 'uuid_id') : false;
     console.log(`uuid_id column exists: ${hasUuidId}`);
 
     console.log('\nChecking if auth_user_id column exists...');
-    const hasAuthUserId = usersColumns.rows ? usersColumns.rows.some((row: any) => row.column_name === 'auth_user_id') : false;
+    const hasAuthUserId = usersColumns && Array.isArray(usersColumns) ? usersColumns.some((row: any) => row.column_name === 'auth_user_id') : false;
     console.log(`auth_user_id column exists: ${hasAuthUserId}`);
 
     // Check if team_members table has the new columns
@@ -44,8 +44,8 @@ async function checkDatabaseSchema() {
     `);
 
     console.log('\nTeam members table columns:');
-    if (teamMembersColumns.rows) {
-      teamMembersColumns.rows.forEach((row: any) => {
+    if (teamMembersColumns && Array.isArray(teamMembersColumns)) {
+      teamMembersColumns.forEach((row: any) => {
         console.log(`  - ${row.column_name}: ${row.data_type} (nullable: ${row.is_nullable})`);
       });
     } else {
@@ -53,7 +53,7 @@ async function checkDatabaseSchema() {
     }
 
     console.log('\nChecking if user_uuid_id column exists...');
-    const hasUserUuidId = teamMembersColumns.rows ? teamMembersColumns.rows.some((row: any) => row.column_name === 'user_uuid_id') : false;
+    const hasUserUuidId = teamMembersColumns && Array.isArray(teamMembersColumns) ? teamMembersColumns.some((row: any) => row.column_name === 'user_uuid_id') : false;
     console.log(`user_uuid_id column exists: ${hasUserUuidId}`);
 
     // Check RLS policies
@@ -65,8 +65,8 @@ async function checkDatabaseSchema() {
     `);
 
     console.log('RLS policies:');
-    if (rlsPolicies.rows) {
-      rlsPolicies.rows.forEach((row: any) => {
+    if (rlsPolicies && Array.isArray(rlsPolicies)) {
+      rlsPolicies.forEach((row: any) => {
         console.log(`  - ${row.tablename}.${row.policyname}`);
       });
     } else {
@@ -80,7 +80,7 @@ async function checkDatabaseSchema() {
       WHERE relname = 'users';
     `);
 
-    console.log('\nRLS enabled on users table:', rlsEnabled.rows ? rlsEnabled.rows[0]?.relrowsecurity : 'Unknown');
+    console.log('\nRLS enabled on users table:', rlsEnabled && Array.isArray(rlsEnabled) ? rlsEnabled[0]?.relrowsecurity : 'Unknown');
 
   } catch (error) {
     console.error('Error checking database schema:', error);
