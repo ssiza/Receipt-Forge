@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTeamForUser, createOrUpdateReceiptPreferences } from '@/lib/db/queries';
+import { getUser, getUserWithTeam, createOrUpdateReceiptPreferences } from '@/lib/db/queries';
 import { log } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
@@ -7,14 +7,24 @@ export async function POST(request: NextRequest) {
     log.info('POST /api/upload-logo - Starting request processing');
 
     // Authenticate user and get team
-    const team = await getTeamForUser();
-    if (!team) {
+    const user = await getUser();
+    if (!user) {
       log.error('POST /api/upload-logo - Authentication failed');
       return NextResponse.json({
         ok: false,
         error: 'Unauthorized - Please sign in again',
         details: 'Authentication failed - please refresh the page and try again'
       }, { status: 401 });
+    }
+
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
+      log.error('POST /api/upload-logo - Team not found');
+      return NextResponse.json({
+        ok: false,
+        error: 'Team not found',
+        details: 'Your team information could not be found'
+      }, { status: 404 });
     }
 
     const formData = await request.formData();
@@ -55,11 +65,11 @@ export async function POST(request: NextRequest) {
     const dataUrl = `data:${file.type};base64,${base64}`;
 
     // Save to database
-    await createOrUpdateReceiptPreferences(team.id, {
+    await createOrUpdateReceiptPreferences(userWithTeam.teamId, {
       logoUrl: dataUrl
     });
 
-    log.info(`POST /api/upload-logo - Logo uploaded successfully for team ${team.id}`);
+    log.info(`POST /api/upload-logo - Logo uploaded successfully for team ${userWithTeam.teamId}`);
     
     return NextResponse.json({
       ok: true,

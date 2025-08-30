@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUser, getTeamForUser, getReceiptById, updateReceipt, deleteReceipt } from '@/lib/db/queries';
+import { getUser, getUserWithTeam, getReceiptById, updateReceipt, deleteReceipt } from '@/lib/db/queries';
 
 import { z } from 'zod';
 
@@ -60,8 +60,8 @@ export async function GET(
       }, { status: 401 });
     }
 
-    const team = await getTeamForUser();
-    if (!team) {
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
       return NextResponse.json({ 
         ok: false,
         error: 'Team not found',
@@ -71,7 +71,7 @@ export async function GET(
 
 
 
-    const receipt = await getReceiptById(id, team.id);
+    const receipt = await getReceiptById(id, userWithTeam.teamId);
     if (!receipt) {
       return NextResponse.json({ 
         ok: false,
@@ -120,8 +120,8 @@ export async function PUT(
       }, { status: 401 });
     }
 
-    const team = await getTeamForUser();
-    if (!team) {
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
       return NextResponse.json({ 
         ok: false,
         error: 'Team not found',
@@ -131,7 +131,7 @@ export async function PUT(
 
 
 
-    const receipt = await getReceiptById(id, team.id);
+    const receipt = await getReceiptById(id, userWithTeam.teamId);
     if (!receipt) {
       return NextResponse.json({ 
         ok: false,
@@ -171,7 +171,7 @@ export async function PUT(
       updateData.totalAmount = validatedData.totalAmount.toString();
     }
 
-    const updatedReceipt = await updateReceipt(id, team.id, updateData);
+    const updatedReceipt = await updateReceipt(id, userWithTeam.teamId, updateData);
     return NextResponse.json({ 
       ok: true,
       data: updatedReceipt
@@ -220,8 +220,8 @@ export async function DELETE(
       }, { status: 401 });
     }
 
-    const team = await getTeamForUser();
-    if (!team) {
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
       return NextResponse.json({ 
         ok: false,
         error: 'Team not found',
@@ -231,7 +231,7 @@ export async function DELETE(
 
 
 
-    const receipt = await getReceiptById(id, team.id);
+    const receipt = await getReceiptById(id, userWithTeam.teamId);
     if (!receipt) {
       return NextResponse.json({ 
         ok: false,
@@ -240,7 +240,7 @@ export async function DELETE(
       }, { status: 404 });
     }
 
-    await deleteReceipt(id, team.id);
+    await deleteReceipt(id, userWithTeam.teamId);
     return NextResponse.json({ 
       ok: true,
       message: 'Receipt deleted successfully'

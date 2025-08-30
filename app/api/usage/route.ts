@@ -1,27 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentMonthUsage, getTeamForUser } from '@/lib/db/queries';
+import { getCurrentMonthUsage, getUser, getUserWithTeam } from '@/lib/db/queries';
 import { log } from '@/lib/logger';
-import { createServerSupabaseClient } from '@/lib/supabaseClient';
 
 async function getAuthenticatedTeam(request: NextRequest) {
   try {
-    // Use Supabase authentication
-    const supabase = await createServerSupabaseClient();
-    const { data: { user }, error } = await supabase.auth.getUser();
-    
-    if (error || !user) {
+    // Get user from Supabase Auth
+    const user = await getUser();
+    if (!user) {
       console.log('User not authenticated via Supabase');
       return null;
     }
 
-    // Get team for authenticated user
-    const team = await getTeamForUser();
-    if (team) {
-      console.log('User authenticated via Supabase:', user.email);
-      return team;
+    // Get user with team information
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
+      console.log('Team not found for authenticated user');
+      return null;
     }
 
-    return null;
+    console.log('User authenticated via Supabase:', user.email);
+    return { id: userWithTeam.teamId };
   } catch (error) {
     console.error('Error in getAuthenticatedTeam:', error);
     return null;

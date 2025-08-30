@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUser, getTeamForUser, getBusinessTemplateById, updateBusinessTemplate, deleteBusinessTemplate } from '@/lib/db/queries';
+import { getUser, getUserWithTeam, getBusinessTemplateById, updateBusinessTemplate, deleteBusinessTemplate } from '@/lib/db/queries';
 import { z } from 'zod';
 
 const updateTemplateSchema = z.object({
@@ -22,12 +22,12 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const team = await getTeamForUser();
-    if (!team) {
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
       return NextResponse.json({ error: 'Team not found' }, { status: 404 });
     }
 
-    const template = await getBusinessTemplateById(id, team.id);
+    const template = await getBusinessTemplateById(id, userWithTeam.teamId);
     if (!template) {
       return NextResponse.json({ error: 'Template not found' }, { status: 404 });
     }
@@ -51,12 +51,12 @@ export async function PUT(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const team = await getTeamForUser();
-    if (!team) {
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
       return NextResponse.json({ error: 'Team not found' }, { status: 404 });
     }
 
-    const template = await getBusinessTemplateById(id, team.id);
+    const template = await getBusinessTemplateById(id, userWithTeam.teamId);
     if (!template) {
       return NextResponse.json({ error: 'Template not found' }, { status: 404 });
     }
@@ -64,7 +64,7 @@ export async function PUT(
     const body = await request.json();
     const validatedData = updateTemplateSchema.parse(body);
 
-    const updatedTemplate = await updateBusinessTemplate(id, team.id, validatedData);
+    const updatedTemplate = await updateBusinessTemplate(id, userWithTeam.teamId, validatedData);
     return NextResponse.json(updatedTemplate);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -91,17 +91,17 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const team = await getTeamForUser();
-    if (!team) {
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
       return NextResponse.json({ error: 'Team not found' }, { status: 404 });
     }
 
-    const template = await getBusinessTemplateById(id, team.id);
+    const template = await getBusinessTemplateById(id, userWithTeam.teamId);
     if (!template) {
       return NextResponse.json({ error: 'Template not found' }, { status: 404 });
     }
 
-    await deleteBusinessTemplate(id, team.id);
+    await deleteBusinessTemplate(id, userWithTeam.teamId);
     return NextResponse.json({ message: 'Template deleted successfully' });
   } catch (error) {
     console.error('Error deleting business template:', error);

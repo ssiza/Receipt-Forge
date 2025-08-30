@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTeamForUser, getReceiptsForTeam, createReceipt, getCurrentMonthUsage, incrementMonthlyUsage } from '@/lib/db/queries';
+import { getUser, getUserWithTeam, getReceiptsForTeam, createReceipt, getCurrentMonthUsage, incrementMonthlyUsage } from '@/lib/db/queries';
 
 import { z } from 'zod';
 import { log } from '@/lib/logger';
@@ -41,15 +41,22 @@ const createReceiptSchema = z.object({
 
 async function getAuthenticatedTeam(request: NextRequest) {
   try {
-    // Simple authentication check
-    const team = await getTeamForUser();
-    if (team) {
-      console.log('Authentication successful via normal flow');
-      return team;
+    // Get user from Supabase Auth
+    const user = await getUser();
+    if (!user) {
+      console.log('Authentication failed - no user found');
+      return null;
     }
 
-    console.log('Authentication failed - no team found');
-    return null;
+    // Get user with team information
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
+      console.log('Authentication failed - no team found');
+      return null;
+    }
+
+    console.log('Authentication successful via Supabase Auth flow');
+    return { id: userWithTeam.teamId };
   } catch (error) {
     console.error('Authentication error:', error);
     return null;
@@ -71,7 +78,7 @@ export async function GET() {
       }, { status: 401 });
     }
 
-    log.info('GET /api/receipts - Team found:', { teamId: team.id, teamName: team.name });
+    log.info('GET /api/receipts - Team found:', { teamId: team.id });
 
 
 
@@ -104,7 +111,7 @@ export async function POST(request: NextRequest) {
       }, { status: 401 });
     }
 
-    log.info('POST /api/receipts - Team found:', { teamId: team.id, teamName: team.name });
+    log.info('POST /api/receipts - Team found:', { teamId: team.id });
 
     // All users have unlimited access for testing
     const currentMonthlyUsage = await getCurrentMonthUsage(team.id);
@@ -140,8 +147,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ 
       ok: false,
-      error: 'Internal server error',
-      details: 'An unexpected error occurred while creating the receipt'
+      error: 'Failed to create receipt',
+      details: 'An error occurred while creating the receipt'
     }, { status: 500 });
   }
 }

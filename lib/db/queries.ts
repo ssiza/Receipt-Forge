@@ -11,7 +11,7 @@ export async function getUser() {
       return null;
     }
 
-    // Find user in our database by auth_user_id
+    // Find user in our database by auth_user_id (Supabase Auth UID)
     const user = await db
       .select()
       .from(users)
@@ -29,20 +29,29 @@ export async function getUser() {
   }
 }
 
+export async function getUserWithTeam() {
+  try {
+    const supabaseUser = await getCurrentUser();
+    
+    if (!supabaseUser) {
+      return null;
+    }
 
+    const result = await db
+      .select({
+        user: users,
+        teamId: teamMembers.teamId
+      })
+      .from(users)
+      .leftJoin(teamMembers, eq(users.id, teamMembers.userId))
+      .where(and(eq(users.authUserId, supabaseUser.id), isNull(users.deletedAt)))
+      .limit(1);
 
-export async function getUserWithTeam(userId: string) {
-  const result = await db
-    .select({
-      user: users,
-      teamId: teamMembers.teamId
-    })
-    .from(users)
-    .leftJoin(teamMembers, eq(users.id, teamMembers.userId))
-    .where(eq(users.id, userId))
-    .limit(1);
-
-  return result[0];
+    return result[0] || null;
+  } catch (error) {
+    console.error('Error in getUserWithTeam:', error);
+    return null;
+  }
 }
 
 export async function getActivityLogs() {

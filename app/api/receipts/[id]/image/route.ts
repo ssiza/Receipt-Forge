@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTeamForUser, getReceiptById, getReceiptPreferences } from '@/lib/db/queries';
+import { getUser, getUserWithTeam, getReceiptById, getReceiptPreferences } from '@/lib/db/queries';
 import { generateReceiptImage } from '@/lib/receipt-generator';
 import { log } from '@/lib/logger';
 import { serializeError } from '@/lib/serializeError';
@@ -13,8 +13,8 @@ export async function GET(
     log.info(`GET /api/receipts/${id}/image - Starting image generation`);
 
     // Authenticate user and get team
-    const team = await getTeamForUser();
-    if (!team) {
+    const user = await getUser();
+    if (!user) {
       log.error(`GET /api/receipts/${id}/image - Authentication failed`);
       return NextResponse.json({
         ok: false,
@@ -23,8 +23,18 @@ export async function GET(
       }, { status: 401 });
     }
 
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
+      log.error(`GET /api/receipts/${id}/image - Team not found`);
+      return NextResponse.json({
+        ok: false,
+        error: 'Team not found',
+        details: 'Your team information could not be found'
+      }, { status: 404 });
+    }
+
     // Get receipt by ID and team
-    const receipt = await getReceiptById(id, team.id);
+    const receipt = await getReceiptById(id, userWithTeam.teamId);
     if (!receipt) {
       log.error(`GET /api/receipts/${id}/image - Receipt not found`);
       return NextResponse.json({
@@ -35,11 +45,14 @@ export async function GET(
     }
 
     // Get receipt preferences
-    const preferences = await getReceiptPreferences(team.id);
+    const preferences = await getReceiptPreferences(userWithTeam.teamId);
     
     // Convert null values to undefined for the template
     const templatePreferences = preferences ? {
       businessName: preferences.businessName || undefined,
+      businessAddress: preferences.businessAddress || undefined,
+      logoUrl: preferences.logoUrl || undefined,
+      tableColor: preferences.tableColor || '#3b82f6',
       footerThankYouText: preferences.footerThankYouText || undefined,
       footerContactInfo: preferences.footerContactInfo || undefined
     } : undefined;
@@ -50,8 +63,8 @@ export async function GET(
 
     // Return image as download
     const response = new NextResponse(imageBuffer as any);
-    response.headers.set('Content-Type', 'image/jpeg');
-    response.headers.set('Content-Disposition', `attachment; filename="receipt-${receipt.receiptNumber}.jpg"`);
+    response.headers.set('Content-Type', 'image/png');
+    response.headers.set('Content-Disposition', `attachment; filename="receipt-${receipt.receiptNumber}.png"`);
     response.headers.set('Content-Length', imageBuffer.length.toString());
 
     log.info(`GET /api/receipts/${id}/image - Image generated successfully: ${receipt.receiptNumber}`);

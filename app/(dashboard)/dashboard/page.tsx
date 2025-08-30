@@ -1,22 +1,59 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, FileText, Download, Cloud, Settings, CheckCircle, Star, Users, Plus, Settings as SettingsIcon, Calendar } from 'lucide-react';
 import Link from 'next/link';
-import { getUser } from '@/lib/db/queries';
 import { ReceiptsFetcher } from '@/components/receipts-fetcher';
 import { NavigationGrid } from '@/components/navigation-grid';
 import { AnimatedBackground } from '@/components/animated-background';
 
+interface User {
+  id: string;
+  email: string;
+  name?: string;
+  role: string;
+}
 
-export default async function HomePage() {
-  const user = await getUser();
+export default function DashboardPage() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const response = await fetch('/api/auth/me');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            setUser(data.user);
+          }
+        }
+      } catch (error) {
+        console.error('Auth check failed:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-orange-50/30 to-rose-50/30 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   // If user is authenticated, show personalized dashboard
   if (user) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-gray-50 via-orange-50/30 to-rose-50/30 relative">
         <AnimatedBackground />
-        
-
         
         {/* Header */}
         <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200/50 sticky top-0 z-40">

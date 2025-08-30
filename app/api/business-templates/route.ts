@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTeamForUser, getBusinessTemplatesForTeam, createBusinessTemplate, updateBusinessTemplate, deleteBusinessTemplate } from '@/lib/db/queries';
+import { getUser, getUserWithTeam, getBusinessTemplatesForTeam, createBusinessTemplate, updateBusinessTemplate, deleteBusinessTemplate } from '@/lib/db/queries';
 import { log } from '@/lib/logger';
 import { serializeError } from '@/lib/serializeError';
 
@@ -8,8 +8,8 @@ export async function GET(request: NextRequest) {
     log.info('GET /api/business-templates - Starting request processing');
 
     // Authenticate user and get team
-    const team = await getTeamForUser();
-    if (!team) {
+    const user = await getUser();
+    if (!user) {
       log.error('GET /api/business-templates - Authentication failed');
       return NextResponse.json({
         ok: false,
@@ -18,10 +18,20 @@ export async function GET(request: NextRequest) {
       }, { status: 401 });
     }
 
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
+      log.error('GET /api/business-templates - Team not found');
+      return NextResponse.json({
+        ok: false,
+        error: 'Team not found',
+        details: 'Your team information could not be found'
+      }, { status: 404 });
+    }
+
     // Get business templates for the team
-    const templates = await getBusinessTemplatesForTeam(team.id);
+    const templates = await getBusinessTemplatesForTeam(userWithTeam.teamId);
     
-    log.info(`GET /api/business-templates - Retrieved ${templates.length} templates for team ${team.id}`);
+    log.info(`GET /api/business-templates - Retrieved ${templates.length} templates for team ${userWithTeam.teamId}`);
     
     return NextResponse.json({
       ok: true,
@@ -45,14 +55,24 @@ export async function POST(request: NextRequest) {
     log.info('POST /api/business-templates - Starting request processing');
 
     // Authenticate user and get team
-    const team = await getTeamForUser();
-    if (!team) {
+    const user = await getUser();
+    if (!user) {
       log.error('POST /api/business-templates - Authentication failed');
       return NextResponse.json({
         ok: false,
         error: 'Unauthorized - Please sign in again',
         details: 'Authentication failed - please refresh the page and try again'
       }, { status: 401 });
+    }
+
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
+      log.error('POST /api/business-templates - Team not found');
+      return NextResponse.json({
+        ok: false,
+        error: 'Team not found',
+        details: 'Your team information could not be found'
+      }, { status: 404 });
     }
 
     const body = await request.json();
@@ -69,7 +89,7 @@ export async function POST(request: NextRequest) {
 
     // Create the template
     const template = await createBusinessTemplate({
-      teamId: team.id,
+      teamId: userWithTeam.teamId,
       name,
       description,
       isDefault: isDefault || false,
@@ -77,7 +97,7 @@ export async function POST(request: NextRequest) {
       customFields: customFields || []
     });
 
-    log.info(`POST /api/business-templates - Created template: ${template.name} for team ${team.id}`);
+    log.info(`POST /api/business-templates - Created template: ${template.name} for team ${userWithTeam.teamId}`);
     
     return NextResponse.json({
       ok: true,
@@ -101,14 +121,24 @@ export async function PUT(request: NextRequest) {
     log.info('PUT /api/business-templates - Starting request processing');
 
     // Authenticate user and get team
-    const team = await getTeamForUser();
-    if (!team) {
+    const user = await getUser();
+    if (!user) {
       log.error('PUT /api/business-templates - Authentication failed');
       return NextResponse.json({
         ok: false,
         error: 'Unauthorized - Please sign in again',
         details: 'Authentication failed - please refresh the page and try again'
       }, { status: 401 });
+    }
+
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
+      log.error('PUT /api/business-templates - Team not found');
+      return NextResponse.json({
+        ok: false,
+        error: 'Team not found',
+        details: 'Your team information could not be found'
+      }, { status: 404 });
     }
 
     const body = await request.json();
@@ -124,7 +154,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Update the template
-    const template = await updateBusinessTemplate(id, team.id, {
+    const template = await updateBusinessTemplate(id, userWithTeam.teamId, {
       name,
       description,
       isDefault,
@@ -140,7 +170,7 @@ export async function PUT(request: NextRequest) {
       }, { status: 404 });
     }
 
-    log.info(`PUT /api/business-templates - Updated template: ${template.name} for team ${team.id}`);
+    log.info(`PUT /api/business-templates - Updated template: ${template.name} for team ${userWithTeam.teamId}`);
     
     return NextResponse.json({
       ok: true,
@@ -164,14 +194,24 @@ export async function DELETE(request: NextRequest) {
     log.info('DELETE /api/business-templates - Starting request processing');
 
     // Authenticate user and get team
-    const team = await getTeamForUser();
-    if (!team) {
+    const user = await getUser();
+    if (!user) {
       log.error('DELETE /api/business-templates - Authentication failed');
       return NextResponse.json({
         ok: false,
         error: 'Unauthorized - Please sign in again',
         details: 'Authentication failed - please refresh the page and try again'
       }, { status: 401 });
+    }
+
+    const userWithTeam = await getUserWithTeam();
+    if (!userWithTeam || !userWithTeam.teamId) {
+      log.error('DELETE /api/business-templates - Team not found');
+      return NextResponse.json({
+        ok: false,
+        error: 'Team not found',
+        details: 'Your team information could not be found'
+      }, { status: 404 });
     }
 
     const { searchParams } = new URL(request.url);
@@ -186,9 +226,9 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Delete the template
-    await deleteBusinessTemplate(id, team.id);
+    await deleteBusinessTemplate(id, userWithTeam.teamId);
 
-    log.info(`DELETE /api/business-templates - Deleted template: ${id} for team ${team.id}`);
+    log.info(`DELETE /api/business-templates - Deleted template: ${id} for team ${userWithTeam.teamId}`);
     
     return NextResponse.json({
       ok: true,
