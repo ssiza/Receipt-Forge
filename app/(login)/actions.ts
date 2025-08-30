@@ -16,11 +16,9 @@ import {
   ActivityType,
   invitations
 } from '@/lib/db/schema';
-import { comparePasswords, hashPassword, setSession } from '@/lib/auth/session';
-import { createAuthToken, setAuthToken, clearAuthToken } from '@/lib/auth/token-auth';
 import { redirect } from 'next/navigation';
-import { cookies } from 'next/headers';
 import { getUser, getUserWithTeam } from '@/lib/db/queries';
+import { createServerSupabaseClient } from '@/lib/supabaseClient';
 import {
   validatedAction,
   validatedActionWithUser
@@ -28,7 +26,7 @@ import {
 
 async function logActivity(
   teamId: number | null | undefined,
-  userId: number,
+  userUuidId: string,
   type: ActivityType,
   ipAddress?: string
 ) {
@@ -37,7 +35,7 @@ async function logActivity(
   }
   const newActivity: NewActivityLog = {
     teamId,
-    userId,
+    userUuidId,
     action: type,
     ipAddress: ipAddress || ''
   };
@@ -51,50 +49,49 @@ const signInSchema = z.object({
 
 export const signIn = validatedAction(signInSchema, async (data, formData) => {
   const { email, password } = data;
-
-  const userWithTeam = await db
-    .select({
-      user: users,
-      team: teams
-    })
-    .from(users)
-    .leftJoin(teamMembers, eq(users.id, teamMembers.userId))
-    .leftJoin(teams, eq(teamMembers.teamId, teams.id))
-    .where(eq(users.email, email))
-    .limit(1);
-
-  if (userWithTeam.length === 0) {
-    return {
-      error: 'Invalid email or password. Please try again.',
-      email,
-      password
-    };
-  }
-
-  const { user: foundUser, team: foundTeam } = userWithTeam[0];
-
-  const isPasswordValid = await comparePasswords(
-    password,
-    foundUser.passwordHash
-  );
-
-  if (!isPasswordValid) {
-    return {
-      error: 'Invalid email or password. Please try again.',
-      email,
-      password
-    };
-  }
+  const supabase = createServerSupabaseClient();
 
   try {
-    // Create both session and token for better cross-browser compatibility
-    const authToken = await createAuthToken(foundUser);
-    
-    await Promise.all([
-      setSession(foundUser),
-      setAuthToken(authToken),
-      logActivity(foundTeam?.id, foundUser.id, ActivityType.SIGN_IN)
-    ]);
+    // Sign in with Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (authError) {
+      return {
+        error: 'Invalid email or password. Please try again.',
+        email,
+        password
+      };
+    }
+
+    if (!authData.user) {
+      return {
+        error: 'Authentication failed. Please try again.',
+        email,
+        password
+      };
+    }
+
+    // Get user from our database
+    const user = await db
+      .select()
+      .from(users)
+      .where(eq(users.authUserId, authData.user.id))
+      .limit(1);
+
+    if (user.length === 0) {
+      return {
+        error: 'User not found in database. Please contact support.',
+        email,
+        password
+      };
+    }
+
+    // Log activity
+    const userWithTeam = await getUserWithTeam(user[0].uuidId);
+    await logActivity(userWithTeam?.teamId, user[0].uuidId, ActivityType.SIGN_IN);
 
     redirect('/dashboard');
   } catch (error) {
@@ -115,113 +112,134 @@ const signUpSchema = z.object({
 
 export const signUp = validatedAction(signUpSchema, async (data, formData) => {
   const { email, password, inviteId } = data;
+  const supabase = createServerSupabaseClient();
 
-  const existingUser = await db
-    .select()
-    .from(users)
-    .where(eq(users.email, email))
-    .limit(1);
-
-  if (existingUser.length > 0) {
-    return {
-      error: 'Failed to create user. Please try again.',
-      email,
-      password
-    };
-  }
-
-  const passwordHash = await hashPassword(password);
-
-  const newUser: NewUser = {
-    email,
-    passwordHash,
-    role: 'owner' // Default role, will be overridden if there's an invitation
-  };
-
-  const [createdUser] = await db.insert(users).values(newUser).returning();
-
-  if (!createdUser) {
-    return {
-      error: 'Failed to create user. Please try again.',
-      email,
-      password
-    };
-  }
-
-  let teamId: number;
-  let userRole: string;
-  let createdTeam: typeof teams.$inferSelect | null = null;
-
-  if (inviteId) {
-    // Check if there's a valid invitation
-    const [invitation] = await db
+  try {
+    // Check if user already exists in our database
+    const existingUser = await db
       .select()
-      .from(invitations)
-      .where(
-        and(
-          eq(invitations.id, parseInt(inviteId)),
-          eq(invitations.email, email),
-          eq(invitations.status, 'pending')
-        )
-      )
+      .from(users)
+      .where(eq(users.email, email))
       .limit(1);
 
-    if (invitation) {
-      teamId = invitation.teamId;
-      userRole = invitation.role;
-
-      await db
-        .update(invitations)
-        .set({ status: 'accepted' })
-        .where(eq(invitations.id, invitation.id));
-
-      await logActivity(teamId, createdUser.id, ActivityType.ACCEPT_INVITATION);
-
-      [createdTeam] = await db
-        .select()
-        .from(teams)
-        .where(eq(teams.id, teamId))
-        .limit(1);
-    } else {
-      return { error: 'Invalid or expired invitation.', email, password };
-    }
-  } else {
-    // Create a new team if there's no invitation
-    const newTeam: NewTeam = {
-      name: `${email}'s Team`
-    };
-
-    [createdTeam] = await db.insert(teams).values(newTeam).returning();
-
-    if (!createdTeam) {
+    if (existingUser.length > 0) {
       return {
-        error: 'Failed to create team. Please try again.',
+        error: 'User already exists. Please try signing in instead.',
         email,
         password
       };
     }
 
-    teamId = createdTeam.id;
-    userRole = 'owner';
+    // Sign up with Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+      }
+    });
 
-    await logActivity(teamId, createdUser.id, ActivityType.CREATE_TEAM);
-  }
+    if (authError) {
+      return {
+        error: 'Failed to create account. Please try again.',
+        email,
+        password
+      };
+    }
 
-  const newTeamMember: NewTeamMember = {
-    userId: createdUser.id,
-    teamId: teamId,
-    role: userRole
-  };
+    if (!authData.user) {
+      return {
+        error: 'Account creation failed. Please try again.',
+        email,
+        password
+      };
+    }
 
-  try {
-    // Create both session and token for better cross-browser compatibility
-    const authToken = await createAuthToken(createdUser);
-    
+    // Create user in our database
+    const newUser: NewUser = {
+      authUserId: authData.user.id,
+      email,
+      role: 'owner' // Default role, will be overridden if there's an invitation
+    };
+
+    const [createdUser] = await db.insert(users).values(newUser).returning();
+
+    if (!createdUser) {
+      return {
+        error: 'Failed to create user. Please try again.',
+        email,
+        password
+      };
+    }
+
+    let teamId: number;
+    let userRole: string;
+    let createdTeam: typeof teams.$inferSelect | null = null;
+
+    if (inviteId) {
+      // Check if there's a valid invitation
+      const [invitation] = await db
+        .select()
+        .from(invitations)
+        .where(
+          and(
+            eq(invitations.id, parseInt(inviteId)),
+            eq(invitations.email, email),
+            eq(invitations.status, 'pending')
+          )
+        )
+        .limit(1);
+
+      if (invitation) {
+        teamId = invitation.teamId;
+        userRole = invitation.role;
+
+        await db
+          .update(invitations)
+          .set({ status: 'accepted' })
+          .where(eq(invitations.id, invitation.id));
+
+        await logActivity(teamId, createdUser.uuidId, ActivityType.ACCEPT_INVITATION);
+
+        [createdTeam] = await db
+          .select()
+          .from(teams)
+          .where(eq(teams.id, teamId))
+          .limit(1);
+      } else {
+        return { error: 'Invalid or expired invitation.', email, password };
+      }
+    } else {
+      // Create a new team if there's no invitation
+      const newTeam: NewTeam = {
+        name: `${email}'s Team`
+      };
+
+      [createdTeam] = await db.insert(teams).values(newTeam).returning();
+
+      if (!createdTeam) {
+        return {
+          error: 'Failed to create team. Please try again.',
+          email,
+          password
+        };
+      }
+
+      teamId = createdTeam.id;
+      userRole = 'owner';
+
+      await logActivity(teamId, createdUser.uuidId, ActivityType.CREATE_TEAM);
+    }
+
+    const newTeamMember: NewTeamMember = {
+      userUuidId: createdUser.uuidId,
+      teamId: teamId,
+      role: userRole
+    };
+
     await Promise.all([
       db.insert(teamMembers).values(newTeamMember),
-      logActivity(teamId, createdUser.id, ActivityType.SIGN_UP),
-      setSession(createdUser),
-      setAuthToken(authToken)
+      logActivity(teamId, createdUser.uuidId, ActivityType.SIGN_UP)
     ]);
 
     redirect('/dashboard');
@@ -236,13 +254,20 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
 });
 
 export async function signOut() {
-  const user = (await getUser()) as User;
-  const userWithTeam = await getUserWithTeam(user.id);
-  await logActivity(userWithTeam?.teamId, user.id, ActivityType.SIGN_OUT);
+  const supabase = createServerSupabaseClient();
   
-  // Clear both session and token
-  (await cookies()).delete('session');
-  await clearAuthToken();
+  try {
+    const user = await getUser();
+    if (user) {
+      const userWithTeam = await getUserWithTeam(user.uuidId);
+      await logActivity(userWithTeam?.teamId, user.uuidId, ActivityType.SIGN_OUT);
+    }
+    
+    // Sign out from Supabase Auth
+    await supabase.auth.signOut();
+  } catch (error) {
+    console.error('Error during sign out:', error);
+  }
 }
 
 const updatePasswordSchema = z.object({

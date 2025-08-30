@@ -1,57 +1,25 @@
 import { desc, and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from './drizzle';
 import { activityLogs, teamMembers, teams, users, receipts, businessTemplates, receiptPreferences, monthlyUsage } from './schema';
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth/session';
-import { verifyAuthToken, getAuthToken } from '@/lib/auth/token-auth';
+import { getCurrentUser } from '@/lib/supabaseClient';
 
 export async function getUser() {
   try {
-    // Try session-based auth first (more reliable)
-    const sessionCookie = (await cookies()).get('session');
-    if (sessionCookie && sessionCookie.value) {
-      try {
-        const sessionData = await verifyToken(sessionCookie.value);
-        if (
-          sessionData &&
-          sessionData.user &&
-          typeof sessionData.user.id === 'number' &&
-          new Date(sessionData.expires) > new Date()
-        ) {
-          const user = await db
-            .select()
-            .from(users)
-            .where(and(eq(users.id, sessionData.user.id), isNull(users.deletedAt)))
-            .limit(1);
-
-          if (user.length > 0) {
-            return user[0];
-          }
-        }
-      } catch (sessionError) {
-        console.error('Session verification failed:', sessionError);
-      }
+    const supabaseUser = await getCurrentUser();
+    
+    if (!supabaseUser) {
+      return null;
     }
 
-    // Fallback to token-based auth
-    const authToken = await getAuthToken();
-    if (authToken) {
-      try {
-        const tokenPayload = await verifyAuthToken(authToken);
-        if (tokenPayload && tokenPayload.exp > Math.floor(Date.now() / 1000)) {
-          const user = await db
-            .select()
-            .from(users)
-            .where(and(eq(users.id, tokenPayload.userId), isNull(users.deletedAt)))
-            .limit(1);
+    // Find user in our database by auth_user_id
+    const user = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.authUserId, supabaseUser.id), isNull(users.deletedAt)))
+      .limit(1);
 
-          if (user.length > 0) {
-            return user[0];
-          }
-        }
-      } catch (tokenError) {
-        console.error('Token verification failed:', tokenError);
-      }
+    if (user.length > 0) {
+      return user[0];
     }
 
     return null;
@@ -63,15 +31,15 @@ export async function getUser() {
 
 
 
-export async function getUserWithTeam(userId: number) {
+export async function getUserWithTeam(userUuidId: string) {
   const result = await db
     .select({
       user: users,
       teamId: teamMembers.teamId
     })
     .from(users)
-    .leftJoin(teamMembers, eq(users.id, teamMembers.userId))
-    .where(eq(users.id, userId))
+    .leftJoin(teamMembers, eq(users.uuidId, teamMembers.userUuidId))
+    .where(eq(users.uuidId, userUuidId))
     .limit(1);
 
   return result[0];
