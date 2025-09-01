@@ -10,8 +10,18 @@ import {
   date,
   uuid,
   boolean,
+  inet,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
+
+export const loginAttempts = pgTable('login_attempts', {
+  id: serial('id').primaryKey(),
+  email: varchar('email', { length: 255 }).notNull(),
+  ip: inet('ip').notNull(),
+  userAgent: text('user_agent'),
+  success: boolean('success').notNull(),
+  attemptedAt: timestamp('attempted_at').notNull().defaultNow(),
+});
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -231,10 +241,14 @@ export type BusinessTemplate = typeof businessTemplates.$inferSelect;
 export type NewBusinessTemplate = typeof businessTemplates.$inferInsert;
 export type MonthlyUsage = typeof monthlyUsage.$inferSelect;
 export type NewMonthlyUsage = typeof monthlyUsage.$inferInsert;
+export type LoginAttempt = typeof loginAttempts.$inferSelect;
+export type NewLoginAttempt = typeof loginAttempts.$inferInsert;
+
 export type TeamDataWithMembers = Team & {
   teamMembers: (TeamMember & {
     user: Pick<User, 'id' | 'name' | 'email'>;
   })[];
+  user: Pick<User, 'id' | 'name' | 'email'>;
 };
 
 export enum ActivityType {

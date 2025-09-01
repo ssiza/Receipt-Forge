@@ -1,43 +1,198 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabaseClient';
-import { db } from '@/lib/db/drizzle';
-import { users } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { createClient, type User as SupabaseUser } from '@supabase/supabase-js';
 import { log } from '@/lib/logger';
+
+// Define types for our database tables
+type LoginAttempt = {
+  id?: number;
+  email: string;
+  ip: string;
+  user_agent: string | null;
+  success: boolean;
+  attempted_at: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type UserProfile = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  auth_user_id: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+interface AuthResponse {
+  data: {
+    user: SupabaseUser | null;
+    session: any | null;
+  };
+  error: any;
+}
+
+// Simple in-memory rate limiting for development
+// In production, you should use a proper rate limiting solution like Upstash Redis
+const rateLimitCache = new Map<string, { count: number; resetAt: number }>();
+
+// Track failed login attempts
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX = 5; // 5 requests per minute
 
 export async function POST(request: NextRequest) {
   try {
     const { email, password } = await request.json();
-
+    // Get client IP from headers (handled by Next.js in production)
+    const forwardedFor = request.headers.get('x-forwarded-for');
+    const ip = (forwardedFor ? forwardedFor.split(',').shift()?.trim() : '127.0.0.1') || 'unknown';
+    
+    // Input validation
     if (!email || !password) {
-      log.error('Login attempt with missing email or password');
+      log.error('Login attempt with missing email or password', { ip });
       return NextResponse.json(
         { success: false, error: 'Email and password are required' },
         { status: 400 }
       );
     }
 
-    log.info(`Starting login process for email: ${email}`);
+    // Check rate limiting
+    const now = Date.now();
+    const rateLimitKey = `rate_limit_${ip}`;
+    const rateLimit = rateLimitCache.get(rateLimitKey);
+    
+    if (rateLimit) {
+      if (now < rateLimit.resetAt) {
+        // Within rate limit window
+        if (rateLimit.count >= RATE_LIMIT_MAX) {
+          log.warn(`Rate limit exceeded for IP: ${ip}`);
+          return NextResponse.json(
+            { success: false, error: 'Too many login attempts. Please try again later.' },
+            { 
+              status: 429, 
+              headers: { 
+                'Retry-After': String(Math.ceil((rateLimit.resetAt - now) / 1000)),
+                'X-RateLimit-Limit': String(RATE_LIMIT_MAX),
+                'X-RateLimit-Remaining': '0',
+                'X-RateLimit-Reset': String(rateLimit.resetAt)
+              } 
+            }
+          );
+        }
+        // Increment request count
+        rateLimit.count += 1;
+      } else {
+        // Reset rate limit window
+        rateLimit.count = 1;
+        rateLimit.resetAt = now + RATE_LIMIT_WINDOW;
+      }
+    } else {
+      // Initialize rate limit for this IP
+      rateLimitCache.set(rateLimitKey, {
+        count: 1,
+        resetAt: now + RATE_LIMIT_WINDOW
+      });
+    }
 
+    log.info(`Starting login process for email: ${email} from IP: ${ip}`);
     const supabase = await createServerSupabaseClient();
 
-    // Step 1: Sign in with Supabase Auth ONLY
+    // Check for existing failed attempts
+    const fifteenMinutesAgo = new Date(Date.now() - LOCKOUT_DURATION).toISOString();
+    let failedAttempts: LoginAttempt[] = [];
+    
+    try {
+      const { data: recentAttempts, error: attemptsError } = await supabase
+        .from('login_attempts')
+        .select('*')
+        .eq('email', email)
+        .gte('attempted_at', fifteenMinutesAgo)
+        .order('attempted_at', { ascending: false });
+
+      if (attemptsError) throw attemptsError;
+      
+      failedAttempts = (recentAttempts || []).filter((a: any) => !a.success);
+      
+      // Check if account is temporarily locked
+      if (failedAttempts.length >= MAX_LOGIN_ATTEMPTS) {
+        const lastAttempt = new Date(failedAttempts[0].attempted_at);
+        const nextAttempt = new Date(lastAttempt.getTime() + LOCKOUT_DURATION);
+        const minutesLeft = Math.ceil((nextAttempt.getTime() - Date.now()) / 60000);
+        
+        log.warn(`Account temporarily locked for ${email} - too many failed attempts`, {
+          ip,
+          failedAttempts: failedAttempts.length,
+          nextAttempt
+        });
+
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: `Too many failed attempts. Please try again in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}.` 
+          },
+          { 
+            status: 429,
+            headers: { 'Retry-After': String(Math.ceil((nextAttempt.getTime() - Date.now()) / 1000)) }
+          }
+        );
+      }
+    } catch (error) {
+      log.error('Error checking login attempts:', error);
+      // Continue with login even if we can't check previous attempts
+      // This ensures we don't lock users out due to database errors
+    }
+
+    // Attempt to authenticate with Supabase Auth
     log.info(`Authenticating with Supabase Auth for email: ${email}`);
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
-      password
-    });
+      password,
+    }) as AuthResponse;
+
+    // Log the login attempt
+    try {
+      const loginAttempt: LoginAttempt = {
+        email,
+        ip,
+        user_agent: request.headers.get('user-agent') || null,
+        success: !error,
+        attempted_at: new Date().toISOString()
+      };
+
+      const { error: logError } = await supabase
+        .from('login_attempts')
+        .insert(loginAttempt);
+
+      if (logError) {
+        log.error('Failed to log login attempt:', logError);
+      }
+    } catch (error) {
+      log.error('Failed to log login attempt:', error);
+      // Don't fail the login if logging fails
+    }
 
     if (error) {
-      log.error(`Supabase login error for ${email}:`, error);
+      log.error(`Login failed for ${email}:`, { 
+        error: error.message, 
+        ip,
+        remainingAttempts: MAX_LOGIN_ATTEMPTS - failedAttempts.length - 1
+      });
+
       return NextResponse.json(
-        { success: false, error: error.message },
+        { 
+          success: false, 
+          error: 'Invalid email or password',
+          remainingAttempts: MAX_LOGIN_ATTEMPTS - failedAttempts.length - 1
+        },
         { status: 401 }
       );
     }
 
     if (!data.user) {
-      log.error(`No user data returned from Supabase Auth for ${email}`);
+      log.error(`No user data returned from Supabase Auth for ${email}`, { ip });
       return NextResponse.json(
         { success: false, error: 'Login failed' },
         { status: 401 }
@@ -46,33 +201,58 @@ export async function POST(request: NextRequest) {
 
     log.info(`Supabase Auth login successful for ${email} with ID: ${data.user.id}`);
 
-    // Step 2: Fetch profile from database using auth_user_id
+    // Fetch user profile from database
     log.info(`Fetching profile from database for user: ${data.user.id}`);
-    const user = await db
-      .select()
-      .from(users)
-      .where(eq(users.authUserId, data.user.id))
-      .limit(1);
+    
+    try {
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('auth_user_id', data.user.id)
+        .single();
 
-    if (user.length === 0) {
-      log.error(`User profile not found in database for Supabase Auth user: ${data.user.id}`);
+      if (userError || !userData) {
+        throw new Error(userError?.message || 'User profile not found');
+      }
+
+      const user = userData as UserProfile;
+      log.info(`Profile found in database for user: ${user.id}`);
+
+      // Update the most recent login attempt to success
+      try {
+        const { error: updateError } = await supabase
+          .from('login_attempts')
+          .update({ success: true })
+          .eq('email', email)
+          .order('attempted_at', { ascending: false })
+          .limit(1);
+
+        if (updateError) {
+          log.error('Failed to update login attempt to success:', updateError);
+        }
+      } catch (updateError) {
+        log.error('Error updating login attempt:', updateError);
+      }
+
+      return NextResponse.json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role
+        }
+      });
+    } catch (error) {
+      log.error('Error fetching user profile:', error);
       return NextResponse.json(
-        { success: false, error: 'User not found in database. Please contact support.' },
+        { 
+          success: false, 
+          error: 'User profile not found in database. Please contact support.' 
+        },
         { status: 404 }
       );
     }
-
-    log.info(`Profile found in database for user: ${data.user.id}`);
-
-    return NextResponse.json({
-      success: true,
-      user: {
-        id: user[0].id,
-        email: user[0].email,
-        name: user[0].name,
-        role: user[0].role
-      }
-    });
 
   } catch (error) {
     log.error('Unexpected error in login:', error);

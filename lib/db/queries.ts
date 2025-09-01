@@ -2,6 +2,15 @@ import { desc, and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from './drizzle';
 import { activityLogs, teamMembers, teams, users, receipts, businessTemplates, receiptPreferences, monthlyUsage } from './schema';
 import { getCurrentUser } from '@/lib/supabaseClient';
+import { log } from '../logger';
+
+// Helper function to check if db is available
+function checkDb() {
+  if (!db) {
+    throw new Error('Database connection not available. Please check your environment variables.');
+  }
+  return db;
+}
 
 export async function getUser() {
   try {
@@ -11,8 +20,10 @@ export async function getUser() {
       return null;
     }
 
+    const database = checkDb();
+
     // Find user in our database by auth_user_id (Supabase Auth UID)
-    const user = await db
+    const user = await database
       .select()
       .from(users)
       .where(and(eq(users.authUserId, supabaseUser.id), isNull(users.deletedAt)))
@@ -24,7 +35,7 @@ export async function getUser() {
 
     return null;
   } catch (error) {
-    console.error('Error in getUser:', error);
+    log.error('Error in getUser:', error);
     return null;
   }
 }
@@ -37,7 +48,9 @@ export async function getUserWithTeam() {
       return null;
     }
 
-    const result = await db
+    const database = checkDb();
+
+    const result = await database
       .select({
         user: users,
         teamId: teamMembers.teamId
@@ -49,7 +62,7 @@ export async function getUserWithTeam() {
 
     return result[0] || null;
   } catch (error) {
-    console.error('Error in getUserWithTeam:', error);
+    log.error('Error in getUserWithTeam:', error);
     return null;
   }
 }
@@ -60,7 +73,9 @@ export async function getActivityLogs() {
     throw new Error('User not authenticated');
   }
 
-  return await db
+  const database = checkDb();
+
+  return await database
     .select({
       id: activityLogs.id,
       action: activityLogs.action,
@@ -81,32 +96,24 @@ export async function getTeamForUser() {
     return null;
   }
 
-  const result = await db.query.teamMembers.findFirst({
-    where: eq(teamMembers.userId, user.id),
-    with: {
-      team: {
-        with: {
-          teamMembers: {
-            with: {
-              user: {
-                columns: {
-                  id: true,
-                  name: true,
-                  email: true
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  });
+  const database = checkDb();
 
-  return result?.team || null;
+  const result = await database
+    .select({
+      team: teams,
+      teamMember: teamMembers
+    })
+    .from(teamMembers)
+    .leftJoin(teams, eq(teamMembers.teamId, teams.id))
+    .where(eq(teamMembers.userId, user.id))
+    .limit(1);
+
+  return result[0] || null;
 }
 
 export async function getReceiptsForTeam(teamId: number) {
-  return await db
+  const database = checkDb();
+  return await database
     .select()
     .from(receipts)
     .where(eq(receipts.teamId, teamId))
@@ -114,7 +121,8 @@ export async function getReceiptsForTeam(teamId: number) {
 }
 
 export async function getReceiptById(receiptId: string, teamId: number) {
-  const result = await db
+  const database = checkDb();
+  const result = await database
     .select()
     .from(receipts)
     .where(and(eq(receipts.id, receiptId), eq(receipts.teamId, teamId)))
@@ -155,7 +163,7 @@ export async function createReceipt(receiptData: {
   }> | null;
   [key: string]: any; // Allow any additional fields
 }) {
-  console.debug('Creating receipt with data:', {
+  log.debug('Creating receipt with data:', {
     teamId: receiptData.teamId,
     customerName: receiptData.customerName,
     itemsCount: receiptData.items.length,
@@ -202,14 +210,14 @@ export async function createReceipt(receiptData: {
     itemAdditionalFields: receiptData.itemAdditionalFields || [],
   };
 
-  console.debug('Inserting receipt with validated data:', insertData);
+  log.debug('Inserting receipt with validated data:', insertData);
 
   try {
-    const [newReceipt] = await db.insert(receipts).values(insertData).returning();
-    console.debug('Successfully created receipt:', { id: newReceipt.id, receiptNumber: newReceipt.receiptNumber });
+    const [newReceipt] = await checkDb().insert(receipts).values(insertData).returning();
+    log.debug('Successfully created receipt:', { id: newReceipt.id, receiptNumber: newReceipt.receiptNumber });
     return newReceipt;
   } catch (error) {
-    console.error('Failed to create receipt:', error);
+    log.error('Failed to create receipt:', error);
     throw error;
   }
 }
@@ -221,7 +229,7 @@ export async function updateReceipt(
   teamId: number,
   updateData: Partial<typeof receipts.$inferInsert>
 ) {
-  const [updatedReceipt] = await db
+  const [updatedReceipt] = await checkDb()
     .update(receipts)
     .set({
       ...updateData,
@@ -234,18 +242,20 @@ export async function updateReceipt(
 }
 
 export async function deleteReceipt(receiptId: string, teamId: number) {
-  return await db.delete(receipts).where(and(eq(receipts.id, receiptId), eq(receipts.teamId, teamId)));
+  return await checkDb().delete(receipts).where(and(eq(receipts.id, receiptId), eq(receipts.teamId, teamId)));
 }
 
 
 
 // Business Template Queries
 export async function getBusinessTemplatesForTeam(teamId: number) {
-  return await db.select().from(businessTemplates).where(eq(businessTemplates.teamId, teamId));
+  const database = checkDb();
+  return await database.select().from(businessTemplates).where(eq(businessTemplates.teamId, teamId));
 }
 
 export async function getBusinessTemplateById(templateId: string, teamId: number) {
-  const templates = await db
+  const database = checkDb();
+  const templates = await database
     .select()
     .from(businessTemplates)
     .where(and(eq(businessTemplates.id, templateId), eq(businessTemplates.teamId, teamId)));
@@ -260,7 +270,7 @@ export async function createBusinessTemplate(data: {
   lineItemFields: any;
   customFields: any;
 }) {
-  const [template] = await db.insert(businessTemplates).values(data).returning();
+  const [template] = await checkDb().insert(businessTemplates).values(data).returning();
   return template;
 }
 
@@ -269,7 +279,7 @@ export async function updateBusinessTemplate(
   teamId: number,
   data: Partial<typeof businessTemplates.$inferInsert>
 ) {
-  const [template] = await db
+  const [template] = await checkDb()
     .update(businessTemplates)
     .set({ ...data, updatedAt: new Date() })
     .where(and(eq(businessTemplates.id, templateId), eq(businessTemplates.teamId, teamId)))
@@ -278,13 +288,14 @@ export async function updateBusinessTemplate(
 }
 
 export async function deleteBusinessTemplate(templateId: string, teamId: number) {
-  return await db
+  return await checkDb()
     .delete(businessTemplates)
     .where(and(eq(businessTemplates.id, templateId), eq(businessTemplates.teamId, teamId)));
 }
 
 export async function getDefaultBusinessTemplate(teamId: number) {
-  const templates = await db
+  const database = checkDb();
+  const templates = await database
     .select()
     .from(businessTemplates)
     .where(and(eq(businessTemplates.teamId, teamId), eq(businessTemplates.isDefault, true)));
@@ -293,7 +304,8 @@ export async function getDefaultBusinessTemplate(teamId: number) {
 
 // Receipt Preferences Queries
 export async function getReceiptPreferences(teamId: number) {
-  const preferences = await db
+  const database = checkDb();
+  const preferences = await database
     .select()
     .from(receiptPreferences)
     .where(eq(receiptPreferences.teamId, teamId))
@@ -315,7 +327,7 @@ export async function createOrUpdateReceiptPreferences(teamId: number, data: {
   const existing = await getReceiptPreferences(teamId);
   
   if (existing) {
-    const [updated] = await db
+    const [updated] = await checkDb()
       .update(receiptPreferences)
       .set({
         ...data,
@@ -325,7 +337,7 @@ export async function createOrUpdateReceiptPreferences(teamId: number, data: {
       .returning();
     return updated;
   } else {
-    const [created] = await db
+    const [created] = await checkDb()
       .insert(receiptPreferences)
       .values({
         teamId,
@@ -338,11 +350,12 @@ export async function createOrUpdateReceiptPreferences(teamId: number, data: {
 
 // Monthly Usage Tracking Functions
 export async function getCurrentMonthUsage(teamId: number): Promise<number> {
+  const database = checkDb();
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1; // getMonth() returns 0-11, we need 1-12
 
-  const usage = await db
+  const usage = await database
     .select()
     .from(monthlyUsage)
     .where(and(
@@ -356,12 +369,13 @@ export async function getCurrentMonthUsage(teamId: number): Promise<number> {
 }
 
 export async function incrementMonthlyUsage(teamId: number): Promise<void> {
+  const database = checkDb();
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1; // getMonth() returns 0-11, we need 1-12
 
   // Check if record exists
-  const existing = await db
+  const existing = await database
     .select()
     .from(monthlyUsage)
     .where(and(
@@ -373,7 +387,7 @@ export async function incrementMonthlyUsage(teamId: number): Promise<void> {
 
   if (existing.length > 0) {
     // Update existing record
-    await db
+    await database
       .update(monthlyUsage)
       .set({
         receiptCount: sql`${monthlyUsage.receiptCount} + 1`,
@@ -386,7 +400,7 @@ export async function incrementMonthlyUsage(teamId: number): Promise<void> {
       ));
   } else {
     // Create new record
-    await db.insert(monthlyUsage).values({
+    await database.insert(monthlyUsage).values({
       teamId,
       year,
       month,
@@ -398,11 +412,12 @@ export async function incrementMonthlyUsage(teamId: number): Promise<void> {
 export async function resetMonthlyUsage(teamId: number): Promise<void> {
   // This function can be used when a user upgrades to reset their usage
   // or for admin purposes to reset usage for a specific month
+  const database = checkDb();
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
-  await db
+  await database
     .update(monthlyUsage)
     .set({
       receiptCount: 0,

@@ -1,18 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient, createBrowserClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { log } from './logger';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Validate environment variables
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables:');
-  console.error('- NEXT_PUBLIC_SUPABASE_URL:', supabaseUrl ? 'SET' : 'MISSING');
-  console.error('- NEXT_PUBLIC_SUPABASE_ANON_KEY:', supabaseAnonKey ? 'SET' : 'MISSING');
-  console.error('Please add these to your .env.local file');
-  console.error('Get them from: https://supabase.com/dashboard/project/_/settings/api');
+if ((!supabaseUrl || !supabaseAnonKey) && typeof window === 'undefined') {
+  log.error('Missing Supabase environment variables:', {
+    NEXT_PUBLIC_SUPABASE_URL: supabaseUrl ? 'SET' : 'MISSING',
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: supabaseAnonKey ? 'SET' : 'MISSING',
+  });
+  throw new Error('Missing Supabase environment variables. Please check your .env.local file');
 }
 
 // Server-side client (for API routes and server components)
@@ -20,7 +21,7 @@ export const createServerSupabaseClient = async () => {
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error('Supabase environment variables are not configured. Please add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to your .env.local file');
   }
-  
+
   const cookieStore = await cookies();
   
   return createServerClient(
@@ -28,25 +29,22 @@ export const createServerSupabaseClient = async () => {
     supabaseAnonKey,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
+        async get(name: string) {
+          const cookie = cookieStore.get(name);
+          return cookie?.value;
         },
-        set(name: string, value: string, options: any) {
+        async set(name: string, value: string, options: any) {
           try {
-            cookieStore.set({ name, value, ...options });
+            await cookieStore.set({ name, value, ...options });
           } catch (error) {
-            // The `set` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+            log.error('Error setting cookie:', { name, error });
           }
         },
-        remove(name: string, options: any) {
+        async remove(name: string, options: any) {
           try {
-            cookieStore.set({ name, value: '', ...options });
+            await cookieStore.set({ name, value: '', ...options, maxAge: 0 });
           } catch (error) {
-            // The `delete` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing
-            // user sessions.
+            log.error('Error removing cookie:', { name, error });
           }
         },
       },

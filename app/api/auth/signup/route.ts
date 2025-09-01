@@ -3,11 +3,36 @@ import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/sup
 import { db } from '@/lib/db/drizzle';
 import { users } from '@/lib/db/schema';
 import { log } from '@/lib/logger';
+import { eq } from 'drizzle-orm';
+
+// Validate email format
+const isValidEmail = (email: string): boolean => {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+};
+
+// Validate password strength
+const isStrongPassword = (password: string): { valid: boolean; message?: string } => {
+  if (password.length < 8) {
+    return { valid: false, message: 'Password must be at least 8 characters long' };
+  }
+  if (!/[A-Z]/.test(password)) {
+    return { valid: false, message: 'Password must contain at least one uppercase letter' };
+  }
+  if (!/[a-z]/.test(password)) {
+    return { valid: false, message: 'Password must contain at least one lowercase letter' };
+  }
+  if (!/[0-9]/.test(password)) {
+    return { valid: false, message: 'Password must contain at least one number' };
+  }
+  return { valid: true };
+};
 
 export async function POST(request: NextRequest) {
   try {
     const { email, password, name } = await request.json();
 
+    // Input validation
     if (!email || !password) {
       log.error('Signup attempt with missing email or password');
       return NextResponse.json(
@@ -16,17 +41,57 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    log.info(`Starting signup process for email: ${email}`);
+    if (!isValidEmail(email)) {
+      return NextResponse.json(
+        { success: false, error: 'Please enter a valid email address' },
+        { status: 400 }
+      );
+    }
 
+    const passwordCheck = isStrongPassword(password);
+    if (!passwordCheck.valid) {
+      return NextResponse.json(
+        { success: false, error: passwordCheck.message },
+        { status: 400 }
+      );
+    }
+
+    log.info(`Starting signup process for email: ${email}`);
     const supabase = await createServerSupabaseClient();
 
-    // Step 1: Sign up with Supabase Auth ONLY
+    // Check if user already exists
+    const { data: { user: existingUser } } = await supabase.auth.getUser();
+    if (existingUser) {
+      log.warn(`Signup attempt for already authenticated user: ${existingUser.id}`);
+      return NextResponse.json(
+        { success: false, error: 'You are already signed in' },
+        { status: 400 }
+      );
+    }
+
+    // Check if email already exists
+    const { data: existingProfile } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (existingProfile) {
+      log.warn(`Signup attempt with existing email: ${email}`);
+      return NextResponse.json(
+        { success: false, error: 'An account with this email already exists' },
+        { status: 400 }
+      );
+    }
+
+    // Create user in Supabase Auth
     log.info(`Creating user in Supabase Auth for email: ${email}`);
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { 
-        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+        data: { name: name || null }
       }
     });
 
@@ -48,19 +113,41 @@ export async function POST(request: NextRequest) {
 
     log.info(`Supabase Auth user created successfully for ${email} with ID: ${data.user.id}`);
 
-    // Step 2: Create profile row in public.users with auth_user_id
+    // Create user profile in database
     try {
       log.info(`Creating profile in database for user: ${data.user.id}`);
+      
+      if (!db) {
+        log.error('Database connection not available');
+        return NextResponse.json(
+          { success: false, error: 'Database connection not available. Please try again.' },
+          { status: 500 }
+        );
+      }
+      
       const newUser = {
         authUserId: data.user.id,
         email: data.user.email!,
         name: name || null,
-        role: 'owner'
+        role: 'owner',
+        createdAt: new Date(),
+        updatedAt: new Date()
       };
 
       const [createdUser] = await db.insert(users).values(newUser).returning();
-
       log.info(`Profile created successfully in database for user: ${data.user.id}`);
+
+      // Send verification email if email confirmation is enabled
+      if (!data.session) {
+        log.info(`Sending email verification for user: ${data.user.id}`);
+        await supabase.auth.resend({
+          type: 'signup',
+          email,
+          options: {
+            emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+          }
+        });
+      }
 
       return NextResponse.json({
         success: true,
@@ -68,14 +155,16 @@ export async function POST(request: NextRequest) {
           id: createdUser.id,
           email: createdUser.email,
           name: createdUser.name,
-          role: createdUser.role
+          role: createdUser.role,
+          emailVerified: !!data.session?.user.email_confirmed_at,
+          session: data.session
         }
       });
 
     } catch (dbError) {
       log.error(`Database error during user creation for ${data.user.id}:`, dbError);
       
-      // If database insert fails, we should clean up the Supabase Auth user
+      // Clean up Supabase Auth user if database insert fails
       log.info(`Cleaning up Supabase Auth user after database failure: ${data.user.id}`);
       try {
         const adminSupabase = createAdminSupabaseClient();

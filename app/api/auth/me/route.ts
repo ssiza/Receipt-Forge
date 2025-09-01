@@ -35,6 +35,15 @@ export async function GET(request: NextRequest) {
 
     // Fetch user profile from database
     log.info(`Fetching profile from database for user: ${user.id}`);
+    
+    if (!db) {
+      log.error('Database connection not available');
+      return NextResponse.json(
+        { success: false, error: 'Database connection not available' },
+        { status: 500 }
+      );
+    }
+    
     const userProfile = await db
       .select()
       .from(users)
