@@ -8,8 +8,12 @@ export async function register() {
     
     // Test DB connectivity on startup
     try {
-      await db.execute(sql`SELECT 1`);
-      console.log('✅ Database connectivity test passed');
+      if (db) {
+        await db.execute(sql`SELECT 1`);
+        console.log('✅ Database connectivity test passed');
+      } else {
+        console.log('⚠️ Database connection not available, skipping connectivity test');
+      }
     } catch (error) {
       console.error('❌ Database connectivity test failed:', error);
     }
