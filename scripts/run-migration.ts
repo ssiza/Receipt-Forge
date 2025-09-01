@@ -1,4 +1,4 @@
-import { client } from '../lib/db/drizzle';
+import { db } from '../lib/db/drizzle';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -6,6 +6,11 @@ import { dirname } from 'path';
 
 export async function runMigration() {
   try {
+    if (!db) {
+      console.error('Database connection not available');
+      process.exit(1);
+    }
+
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
     const migrationsDir = path.join(process.cwd(), 'lib/db/migrations');
@@ -24,7 +29,7 @@ export async function runMigration() {
       
       try {
         const sql = fs.readFileSync(filePath, 'utf8');
-        await client.unsafe(sql);
+        await db.execute(sql);
         console.log(`✅ Successfully applied migration: ${file}`);
       } catch (error) {
         console.error(`❌ Error running migration ${file}:`, error);
@@ -37,7 +42,6 @@ export async function runMigration() {
     console.error('Error running migrations:', error);
     process.exit(1);
   } finally {
-    await client.end();
     process.exit(0);
   }
 }
