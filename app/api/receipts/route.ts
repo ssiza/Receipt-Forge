@@ -10,7 +10,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// Receipt schema without userId or teamId - these will be resolved from Supabase Auth
+// Receipt schema - no team references
 const createReceiptSchema = z.object({
   issueDate: z.string().transform(str => new Date(str)),
   customerName: z.string().min(1, 'Customer name is required'),
@@ -39,10 +39,28 @@ const createReceiptSchema = z.object({
   })).optional().nullable(),
 });
 
+// Helper function to handle API errors
+function handleApiError(error: unknown, context: string) {
+  const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+  log.error(`[${context}] Error:`, errorMessage);
+  
+  if (error instanceof Error && 'code' in error) {
+    log.error(`[${context}] Error code:`, (error as any).code);
+  }
+  
+  return new NextResponse(
+    JSON.stringify({
+      error: 'Failed to process request',
+      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+    }),
+    { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+  );
+}
+
 // GET /api/receipts - Get all receipts for the authenticated user
 export async function GET(request: NextRequest) {
   try {
-    log.info('GET /api/receipts - Starting request processing');
+    log.info('GET /api/receipts - Starting request');
     
     const supabase = await createServerSupabaseClient();
     
@@ -52,59 +70,40 @@ export async function GET(request: NextRequest) {
     if (authError || !user) {
       log.error('Authentication failed:', authError);
       return NextResponse.json(
-        { error: 'Authentication failed' },
+        { error: 'Authentication required' },
         { status: 401, headers: corsHeaders }
       );
     }
 
-    log.info(`Getting receipts for user: ${user.id}`);
+    log.info(`Fetching receipts for user: ${user.id}`);
 
-    // Get user profile from database
-    const { data: userProfile, error: userError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('auth_user_id', user.id)
-      .single();
-
-    if (userError || !userProfile) {
-      log.error('User profile not found:', userError);
-      return NextResponse.json(
-        { error: 'User profile not found' },
-        { status: 404, headers: corsHeaders }
-      );
-    }
-
-    // Get all receipts for this user
-    const { data: receipts, error: receiptsError } = await supabase
+    // Get user's receipts directly by user_id
+    const { data: receipts, error: fetchError } = await supabase
       .from('receipts')
       .select('*')
-      .eq('user_id', userProfile.id)
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false });
-      
-    if (receiptsError) {
-      log.error('Error fetching receipts:', receiptsError);
-      throw receiptsError;
-    }
-    
-    log.info(`Found ${receipts?.length || 0} receipts for user: ${userProfile.id}`);
 
+    if (fetchError) {
+      log.error('Database error:', fetchError);
+      throw fetchError;
+    }
+
+    log.info(`Found ${receipts?.length || 0} receipts for user ${user.id}`);
+    
     return NextResponse.json(
       { receipts: receipts || [] },
       { status: 200, headers: corsHeaders }
     );
   } catch (error) {
-    log.error('Error in GET /api/receipts:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch receipts' },
-      { status: 500, headers: corsHeaders }
-    );
+    return handleApiError(error, 'GET /api/receipts');
   }
 }
 
 // POST /api/receipts - Create a new receipt
 export async function POST(request: NextRequest) {
   try {
-    log.info('POST /api/receipts - Starting request processing');
+    log.info('POST /api/receipts - Starting request');
     
     const body = await request.json();
     const validation = createReceiptSchema.safeParse(body);
@@ -112,7 +111,10 @@ export async function POST(request: NextRequest) {
     if (!validation.success) {
       log.error('Validation error:', validation.error.format());
       return NextResponse.json(
-        { error: 'Validation error', details: validation.error.format() },
+        { 
+          error: 'Validation error', 
+          details: validation.error.format() 
+        },
         { status: 400, headers: corsHeaders }
       );
     }
@@ -126,61 +128,54 @@ export async function POST(request: NextRequest) {
     if (authError || !user) {
       log.error('Authentication failed:', authError);
       return NextResponse.json(
-        { error: 'Authentication failed' },
+        { error: 'Authentication required' },
         { status: 401, headers: corsHeaders }
       );
     }
 
     log.info(`Creating receipt for user: ${user.id}`);
 
-    // Get user profile from database
-    const { data: userProfile, error: userError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('auth_user_id', user.id)
-      .single();
-
-    if (userError || !userProfile) {
-      log.error('User profile not found:', userError);
-      return NextResponse.json(
-        { error: 'User profile not found' },
-        { status: 404, headers: corsHeaders }
-      );
-    }
+    // Generate a unique receipt number
+    const receiptNumber = `RCPT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     // Helper function to safely convert dates to ISO strings
-    const toISODateString = (date?: Date | string | null): string | undefined => {
-      if (!date) return undefined;
+    const toISODateString = (date?: Date | string | null): string | null => {
+      if (!date) return null;
       try {
-        return date instanceof Date ? date.toISOString() : new Date(date).toISOString();
-      } catch (e) {
-        return undefined;
+        const d = date instanceof Date ? date : new Date(date);
+        return isNaN(d.getTime()) ? null : d.toISOString();
+      } catch {
+        return null;
       }
     };
 
     // Prepare receipt data for database insertion
     const receiptInsertData = {
-      user_id: userProfile.id, // Use the user ID from the database, not from client
-      status: receiptData.status || 'draft',
+      user_id: user.id, // Directly use auth user ID
+      receipt_number: receiptNumber,
       issue_date: toISODateString(receiptData.issueDate) || new Date().toISOString(),
       customer_name: receiptData.customerName,
       customer_email: receiptData.customerEmail || null,
       customer_phone: receiptData.customerPhone || null,
       customer_address: receiptData.customerAddress || null,
-      tax_amount: receiptData.taxAmount,
-      total_amount: receiptData.totalAmount,
-      currency: receiptData.currency,
+      items: receiptData.items || [],
+      subtotal: receiptData.subtotal.toString(),
+      tax_amount: (receiptData.taxAmount || 0).toString(),
+      total_amount: receiptData.totalAmount.toString(),
+      currency: receiptData.currency || 'USD',
+      status: receiptData.status || 'draft',
       notes: receiptData.notes || null,
       business_name: receiptData.businessName || null,
       business_address: receiptData.businessAddress || null,
       business_phone: receiptData.businessPhone || null,
       business_email: receiptData.businessEmail || null,
-      due_date: toISODateString(receiptData.dueDate) || null,
+      due_date: toISODateString(receiptData.dueDate),
       payment_terms: receiptData.paymentTerms || null,
       reference: receiptData.reference || null,
       item_additional_fields: receiptData.itemAdditionalFields || null,
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      // team_id is intentionally omitted to be NULL
     };
 
     log.info('Inserting receipt with data:', {
@@ -197,22 +192,18 @@ export async function POST(request: NextRequest) {
       .single();
     
     if (createError) {
-      log.error('Error creating receipt:', createError);
+      log.error('Database error:', createError);
       throw createError;
     }
     
-    log.info('Receipt created successfully:', { receipt_id: receipt.id });
+    log.info('Receipt created successfully:', { receipt_id: receipt?.id });
 
     return NextResponse.json(
       { receipt },
       { status: 201, headers: corsHeaders }
     );
   } catch (error) {
-    log.error('Error in POST /api/receipts:', error);
-    return NextResponse.json(
-      { error: 'Failed to create receipt' },
-      { status: 500, headers: corsHeaders }
-    );
+    return handleApiError(error, 'POST /api/receipts');
   }
 }
 

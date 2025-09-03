@@ -78,8 +78,8 @@ export const invitations = pgTable('invitations', {
 
 export const receipts = pgTable('receipts', {
   id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
   teamId: integer('team_id')
-    .notNull()
     .references(() => teams.id, { onDelete: 'cascade' }),
   receiptNumber: text('receipt_number').notNull().unique(),
   issueDate: date('issue_date').notNull(),

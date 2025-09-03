@@ -28,17 +28,14 @@ const fetcher = async (url: string) => {
       const responseText = await response.text();
       let errorData;
       
-      if (responseText.trim()) {
-        try {
-          errorData = JSON.parse(responseText);
-        } catch {
-          errorData = { error: 'Invalid response format' };
-        }
-      } else {
-        errorData = { error: 'Empty response from server' };
+      try {
+        errorData = responseText.trim() ? JSON.parse(responseText) : { error: 'Empty response from server' };
+      } catch (parseError) {
+        errorData = { error: 'Invalid response format', details: responseText };
       }
       
-      throw new HttpError(response.status, response.statusText, responseText);
+      console.error(`HTTP Error ${response.status}: ${response.statusText}`, errorData);
+      throw new HttpError(response.status, response.statusText, JSON.stringify(errorData));
     }
     
     const responseText = await response.text();
@@ -154,25 +151,31 @@ function ReceiptsPageContent() {
     }).format(numAmount);
   };
 
-  const handleSubmit = async (formData: any) => {
-    console.log('Submitting form data:', { formData, editingReceipt });
+  const handleSubmit = async (formData: ReceiptFormData) => {
     setIsSubmitting(true);
     
     try {
-      const url = editingReceipt ? `/api/receipts/${editingReceipt.id}` : '/api/receipts';
-      const method = editingReceipt ? 'PUT' : 'POST';
-      
-      // Ensure all required fields are present and properly formatted
+      // Clean the form data
       const cleanedFormData = {
-        // Required fields
-        customerName: formData.customerName || '',
-        issueDate: formData.issueDate || new Date().toISOString(),
-        status: formData.status || 'draft',
-        currency: formData.currency || 'USD',
-        taxAmount: parseFloat(formData.taxAmount) || 0,
-        totalAmount: parseFloat(formData.totalAmount) || 0,
-        
-        // Optional fields with null fallback
+        ...formData,
+        // Ensure all required fields are present and properly formatted
+        items: formData.items.map(item => ({
+          description: item.description,
+          quantity: Number(item.quantity),
+          unitPrice: Number(item.unitPrice),
+          totalPrice: Number(item.quantity) * Number(item.unitPrice),
+          // Include any additional fields
+          ...(formData.itemAdditionalFields?.reduce<Record<string, any>>((acc, field) => {
+            if (item[field.name] !== undefined) {
+              acc[field.name] = field.type === 'number' ? Number(item[field.name]) : item[field.name];
+            }
+            return acc;
+          }, {}))
+        })),
+        subtotal: Number(formData.subtotal),
+        taxAmount: Number(formData.taxAmount || 0),
+        totalAmount: Number(formData.totalAmount),
+        // Ensure optional fields are either strings or null
         customerEmail: formData.customerEmail || null,
         customerPhone: formData.customerPhone || null,
         customerAddress: formData.customerAddress || null,
@@ -181,33 +184,27 @@ function ReceiptsPageContent() {
         businessAddress: formData.businessAddress || null,
         businessPhone: formData.businessPhone || null,
         businessEmail: formData.businessEmail || null,
-        dueDate: formData.dueDate ? new Date(formData.dueDate).toISOString() : null,
+        dueDate: formData.dueDate || null,
         paymentTerms: formData.paymentTerms || null,
         reference: formData.reference || null,
-        itemAdditionalFields: formData.itemAdditionalFields || null,
-        
-        // Ensure items array is properly formatted
-        items: (formData.items || []).map((item: any) => ({
-          description: item.description || '',
-          quantity: parseFloat(item.quantity) || 0,
-          unitPrice: parseFloat(item.unitPrice) || 0,
-          totalPrice: parseFloat(item.totalPrice) || 0,
-          ...(item.id && { id: item.id })
-        }))
+        itemAdditionalFields: formData.itemAdditionalFields || []
       };
-      
-      console.log('Making request:', { url, method, cleanedFormData });
+
+      console.log('Submitting receipt data:', cleanedFormData);
+
+      const isEdit = !!editingReceipt;
+      const url = isEdit ? `/api/receipts/${editingReceipt.id}` : '/api/receipts';
+      const method = isEdit ? 'PUT' : 'POST';
       
       const response = await fetch(url, {
         method,
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include', // Include cookies in the request
+        credentials: 'include',
         body: JSON.stringify(cleanedFormData),
       });
 
-      // Always read response as text first
       const responseText = await response.text();
       let responseData;
       
@@ -217,42 +214,55 @@ function ReceiptsPageContent() {
           responseData = JSON.parse(responseText);
         } catch (parseError) {
           console.error('Failed to parse response JSON:', parseError);
-          responseData = { error: 'Invalid response format' };
+          throw new Error('Invalid response format from server');
         }
-      } else {
-        responseData = { error: 'Empty response from server' };
       }
 
-      if (response.ok) {
-        console.log('Receipt saved successfully:', responseData);
-        setShowCreateForm(false);
-        setEditingReceipt(null);
-        mutate();
-      } else {
-        // Throw HttpError with status and body
-        throw new HttpError(response.status, response.statusText, responseText);
+      if (!response.ok) {
+        const errorMessage = responseData?.error || response.statusText || 'Unknown error';
+        const errorDetails = responseData?.details || responseText;
+        console.error(`API Error (${response.status}):`, errorMessage, errorDetails);
+        throw new HttpError(response.status, errorMessage, JSON.stringify(responseData || {}));
       }
+
+      console.log('Receipt saved successfully:', responseData);
+      setShowCreateForm(false);
+      setEditingReceipt(null);
+      mutate();
+      
+      // Show success message
+      alert(isEdit ? 'Receipt updated successfully!' : 'Receipt created successfully!');
     } catch (error) {
-      if (error instanceof HttpError && error.status === 409) {
-        alert("That receipt number already exists. Please try again.");
-      } else {
-        console.error('Error saving receipt:', serializeError(error));
-        
-        let errorMessage = 'Failed to save receipt';
-        if (error instanceof HttpError) {
-          errorMessage = `HTTP ${error.status}: ${error.message}`;
-          if (error.body) {
-            try {
-              const errorData = JSON.parse(error.body);
-              errorMessage = errorData.error || errorData.details || errorMessage;
-            } catch {
-              errorMessage = `${errorMessage} - ${error.body}`;
-            }
+      console.error('Error saving receipt:', error);
+      
+      let errorMessage = 'Failed to save receipt';
+      let showAlert = true;
+      
+      if (error instanceof HttpError) {
+        if (error.status === 409) {
+          errorMessage = "A receipt with this number already exists. Please use a different receipt number.";
+        } else if (error.status === 401) {
+          errorMessage = "You need to be logged in to save receipts. Please sign in and try again.";
+        } else if (error.status === 403) {
+          errorMessage = "You don't have permission to perform this action.";
+        } else if (error.status === 404) {
+          errorMessage = "The requested resource was not found.";
+        } else if (error.status >= 500) {
+          errorMessage = "A server error occurred. Please try again later.";
+        } else {
+          // For other HTTP errors, try to extract a meaningful message
+          try {
+            const errorData = error.body ? JSON.parse(error.body) : {};
+            errorMessage = errorData.error || errorData.details || error.message || errorMessage;
+          } catch (parseError) {
+            errorMessage = error.message || errorMessage;
           }
-        } else if (error instanceof Error) {
-          errorMessage = error.message;
         }
-        
+      } else if (error instanceof Error) {
+        errorMessage = error.message || 'An unexpected error occurred';
+      }
+      
+      if (showAlert) {
         alert(errorMessage);
       }
     } finally {

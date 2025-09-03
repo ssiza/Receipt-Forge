@@ -65,6 +65,14 @@ export interface ReceiptFormData {
   dueDate?: string;
   paymentTerms?: string;
   reference?: string;
+  // Item additional fields
+  itemAdditionalFields?: Array<{
+    id: string;
+    name: string;
+    label: string;
+    type: 'text' | 'number' | 'date' | 'select';
+    options?: string[];
+  }>;
 }
 
 export interface Receipt {

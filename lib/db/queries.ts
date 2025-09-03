@@ -120,19 +120,20 @@ export async function getReceiptsForTeam(teamId: number) {
     .orderBy(desc(receipts.createdAt));
 }
 
-export async function getReceiptById(receiptId: string, teamId: number) {
+export async function getReceiptById(receiptId: string, userId: string) {
   const database = checkDb();
   const result = await database
     .select()
     .from(receipts)
-    .where(and(eq(receipts.id, receiptId), eq(receipts.teamId, teamId)))
+    .where(and(eq(receipts.id, receiptId), eq(receipts.userId, userId)))
     .limit(1);
 
   return result.length > 0 ? result[0] : null;
 }
 
 export async function createReceipt(receiptData: {
-  teamId: number;
+  userId: string;
+  teamId?: number | null;
   issueDate: Date;
   customerName: string;
   customerEmail?: string;
@@ -183,7 +184,8 @@ export async function createReceipt(receiptData: {
 
   // Validate and provide defaults for all fields
   const insertData = {
-    teamId: receiptData.teamId,
+    userId: receiptData.userId,
+    teamId: receiptData.teamId || null,
     receiptNumber,
     issueDate: issueDate.toISOString().split('T')[0], // Convert to YYYY-MM-DD string format
     customerName: receiptData.customerName || '',
@@ -222,30 +224,33 @@ export async function createReceipt(receiptData: {
   }
 }
 
-
-
 export async function updateReceipt(
   receiptId: string,
-  teamId: number,
+  userId: string,
   updateData: Partial<typeof receipts.$inferInsert>
 ) {
-  const [updatedReceipt] = await checkDb()
-    .update(receipts)
-    .set({
-      ...updateData,
-      updatedAt: new Date()
-    })
-    .where(and(eq(receipts.id, receiptId), eq(receipts.teamId, teamId)))
-    .returning();
-
-  return updatedReceipt;
+  const database = checkDb();
+  
+  try {
+    const [updatedReceipt] = await database
+      .update(receipts)
+      .set({
+        ...updateData,
+        updatedAt: new Date()
+      })
+      .where(and(eq(receipts.id, receiptId), eq(receipts.userId, userId)))
+      .returning();
+      
+    return updatedReceipt;
+  } catch (error) {
+    log.error('Error updating receipt:', error);
+    return null;
+  }
 }
 
-export async function deleteReceipt(receiptId: string, teamId: number) {
-  return await checkDb().delete(receipts).where(and(eq(receipts.id, receiptId), eq(receipts.teamId, teamId)));
+export async function deleteReceipt(receiptId: string, userId: string) {
+  return await checkDb().delete(receipts).where(and(eq(receipts.id, receiptId), eq(receipts.userId, userId)));
 }
-
-
 
 // Business Template Queries
 export async function getBusinessTemplatesForTeam(teamId: number) {

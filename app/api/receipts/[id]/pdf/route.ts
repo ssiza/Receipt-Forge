@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUser, getUserWithTeam, getReceiptById, getReceiptPreferences } from '@/lib/db/queries';
+import { createServerSupabaseClient } from '@/lib/supabaseClient';
 import { generateReceiptPDF } from '@/lib/receipt-generator';
 import { log } from '@/lib/logger';
-import { serializeError } from '@/lib/serializeError';
 
 export async function GET(
   request: NextRequest,
@@ -12,10 +11,13 @@ export async function GET(
     const { id } = await params;
     log.info(`GET /api/receipts/${id}/pdf - Starting PDF generation`);
 
-    // Authenticate user and get team
-    const user = await getUser();
-    if (!user) {
-      log.error(`GET /api/receipts/${id}/pdf - Authentication failed`);
+    const supabase = await createServerSupabaseClient();
+    
+    // Get current user from Supabase Auth
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      log.error(`GET /api/receipts/${id}/pdf - Authentication failed:`, authError);
       return NextResponse.json({
         ok: false,
         error: 'Unauthorized - Please sign in again',
@@ -23,20 +25,34 @@ export async function GET(
       }, { status: 401 });
     }
 
-    const userWithTeam = await getUserWithTeam();
-    if (!userWithTeam || !userWithTeam.teamId) {
-      log.error(`GET /api/receipts/${id}/pdf - Team not found`);
+    log.info(`GET /api/receipts/${id}/pdf - Getting receipt for user: ${user.id}`);
+
+    // Get user profile from database
+    const { data: userProfile, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('auth_user_id', user.id)
+      .single();
+
+    if (userError || !userProfile) {
+      log.error(`GET /api/receipts/${id}/pdf - User profile not found:`, userError);
       return NextResponse.json({
         ok: false,
-        error: 'Team not found',
-        details: 'Your team information could not be found'
+        error: 'User profile not found',
+        details: 'Your user profile could not be found'
       }, { status: 404 });
     }
 
-    // Get receipt by ID and team
-    const receipt = await getReceiptById(id, userWithTeam.teamId);
-    if (!receipt) {
-      log.error(`GET /api/receipts/${id}/pdf - Receipt not found`);
+    // Get receipt by ID (only if it belongs to this user)
+    const { data: receipt, error: receiptError } = await supabase
+      .from('receipts')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userProfile.id)
+      .single();
+
+    if (receiptError || !receipt) {
+      log.error(`GET /api/receipts/${id}/pdf - Receipt not found:`, receiptError);
       return NextResponse.json({
         ok: false,
         error: 'Receipt not found',
@@ -44,30 +60,39 @@ export async function GET(
       }, { status: 404 });
     }
 
-    // Get receipt preferences
-    const preferences = await getReceiptPreferences(userWithTeam.teamId);
+    // Get receipt preferences for this user
+    const { data: preferences, error: preferencesError } = await supabase
+      .from('receipt_preferences')
+      .select('*')
+      .eq('user_id', userProfile.id)
+      .single();
+
+    if (preferencesError && preferencesError.code !== 'PGRST116') { // PGRST116 = no rows returned
+      log.error(`GET /api/receipts/${id}/pdf - Error fetching preferences:`, preferencesError);
+      // Continue without preferences if there's an error
+    }
     
     // Convert null values to undefined for the template
     const templatePreferences = preferences ? {
-      businessName: preferences.businessName || undefined,
-      businessAddress: preferences.businessAddress || undefined,
-      logoUrl: preferences.logoUrl || undefined,
-      tableColor: preferences.tableColor || '#3b82f6',
-      footerThankYouText: preferences.footerThankYouText || undefined,
-      footerContactInfo: preferences.footerContactInfo || undefined
+      businessName: preferences.business_name || undefined,
+      businessAddress: preferences.business_address || undefined,
+      logoUrl: preferences.logo_url || undefined,
+      tableColor: preferences.table_color || '#3b82f6',
+      footerThankYouText: preferences.footer_thank_you_text || undefined,
+      footerContactInfo: preferences.footer_contact_info || undefined
     } : undefined;
     
     // Generate PDF
-    log.info(`GET /api/receipts/${id}/pdf - Generating PDF for receipt ${receipt.receiptNumber}`);
+    log.info(`GET /api/receipts/${id}/pdf - Generating PDF for receipt ${receipt.receipt_number}`);
     const pdfBuffer = await generateReceiptPDF(receipt as any, templatePreferences);
 
     // Return PDF as download
     const response = new NextResponse(pdfBuffer as any);
     response.headers.set('Content-Type', 'application/pdf');
-    response.headers.set('Content-Disposition', `attachment; filename="receipt-${receipt.receiptNumber}.pdf"`);
+    response.headers.set('Content-Disposition', `attachment; filename="receipt-${receipt.receipt_number}.pdf"`);
     response.headers.set('Content-Length', pdfBuffer.length.toString());
 
-    log.info(`GET /api/receipts/${id}/pdf - PDF generated successfully: ${receipt.receiptNumber}`);
+    log.info(`GET /api/receipts/${id}/pdf - PDF generated successfully: ${receipt.receipt_number}`);
     return response;
 
   } catch (error) {

@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUser, getUserWithTeam, createOrUpdateReceiptPreferences } from '@/lib/db/queries';
+import { createServerSupabaseClient } from '@/lib/supabaseClient';
 import { log } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   try {
     log.info('POST /api/upload-logo - Starting request processing');
 
-    // Authenticate user and get team
-    const user = await getUser();
-    if (!user) {
-      log.error('POST /api/upload-logo - Authentication failed');
+    const supabase = await createServerSupabaseClient();
+    
+    // Get current user from Supabase Auth
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      log.error('POST /api/upload-logo - Authentication failed:', authError);
       return NextResponse.json({
         ok: false,
         error: 'Unauthorized - Please sign in again',
@@ -17,13 +20,21 @@ export async function POST(request: NextRequest) {
       }, { status: 401 });
     }
 
-    const userWithTeam = await getUserWithTeam();
-    if (!userWithTeam || !userWithTeam.teamId) {
-      log.error('POST /api/upload-logo - Team not found');
+    log.info(`POST /api/upload-logo - Uploading logo for user: ${user.id}`);
+
+    // Get user profile from database
+    const { data: userProfile, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('auth_user_id', user.id)
+      .single();
+
+    if (userError || !userProfile) {
+      log.error('POST /api/upload-logo - User profile not found:', userError);
       return NextResponse.json({
         ok: false,
-        error: 'Team not found',
-        details: 'Your team information could not be found'
+        error: 'User profile not found',
+        details: 'Your user profile could not be found'
       }, { status: 404 });
     }
 
@@ -64,12 +75,45 @@ export async function POST(request: NextRequest) {
     const base64 = buffer.toString('base64');
     const dataUrl = `data:${file.type};base64,${base64}`;
 
-    // Save to database
-    await createOrUpdateReceiptPreferences(userWithTeam.teamId, {
-      logoUrl: dataUrl
-    });
+    // Check if receipt preferences already exist for this user
+    const { data: existingPreferences } = await supabase
+      .from('receipt_preferences')
+      .select('id')
+      .eq('user_id', userProfile.id)
+      .single();
 
-    log.info(`POST /api/upload-logo - Logo uploaded successfully for team ${userWithTeam.teamId}`);
+    if (existingPreferences) {
+      // Update existing preferences
+      const { error: updateError } = await supabase
+        .from('receipt_preferences')
+        .update({
+          logo_url: dataUrl,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', userProfile.id);
+
+      if (updateError) {
+        log.error('POST /api/upload-logo - Error updating preferences:', updateError);
+        throw updateError;
+      }
+    } else {
+      // Create new preferences
+      const { error: createError } = await supabase
+        .from('receipt_preferences')
+        .insert({
+          user_id: userProfile.id,
+          logo_url: dataUrl,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+
+      if (createError) {
+        log.error('POST /api/upload-logo - Error creating preferences:', createError);
+        throw createError;
+      }
+    }
+
+    log.info(`POST /api/upload-logo - Logo uploaded successfully for user: ${userProfile.id}`);
     
     return NextResponse.json({
       ok: true,
