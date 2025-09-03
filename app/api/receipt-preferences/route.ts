@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUser, getUserWithTeam, getReceiptPreferences, createOrUpdateReceiptPreferences } from '@/lib/db/queries';
+import { createServerSupabaseClient } from '@/lib/supabaseClient';
 import { log } from '@/lib/logger';
 
 export async function GET() {
   try {
     log.info('GET /api/receipt-preferences - Starting request processing');
 
-    const user = await getUser();
-    if (!user) {
-      log.error('GET /api/receipt-preferences - Authentication failed');
+    const supabase = await createServerSupabaseClient();
+    
+    // Get current user from Supabase Auth
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      log.error('GET /api/receipt-preferences - Authentication failed:', authError);
       return NextResponse.json({
         ok: false,
         error: 'Unauthorized',
@@ -16,23 +20,56 @@ export async function GET() {
       }, { status: 401 });
     }
 
-    const userWithTeam = await getUserWithTeam();
-    if (!userWithTeam || !userWithTeam.teamId) {
-      log.error('GET /api/receipt-preferences - Team not found');
+    log.info(`GET /api/receipt-preferences - Getting preferences for user: ${user.id}`);
+
+    // Get user profile from database
+    const { data: userProfile, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('auth_user_id', user.id)
+      .single();
+
+    if (userError || !userProfile) {
+      log.error('GET /api/receipt-preferences - User profile not found:', userError);
       return NextResponse.json({
         ok: false,
-        error: 'Team not found',
-        details: 'Your team information could not be found'
+        error: 'User profile not found',
+        details: 'Your user profile could not be found'
       }, { status: 404 });
     }
 
-    const preferences = await getReceiptPreferences(userWithTeam.teamId);
-    
-    log.info(`GET /api/receipt-preferences - Retrieved preferences for team ${userWithTeam.teamId}`);
+    // Get receipt preferences for this user
+    const { data: preferences, error: preferencesError } = await supabase
+      .from('receipt_preferences')
+      .select('*')
+      .eq('user_id', userProfile.id)
+      .single();
+
+    if (preferencesError && preferencesError.code !== 'PGRST116') { // PGRST116 = no rows returned
+      log.error('GET /api/receipt-preferences - Error fetching preferences:', preferencesError);
+      return NextResponse.json({
+        ok: false,
+        error: 'Failed to retrieve preferences',
+        details: 'An error occurred while fetching receipt preferences'
+      }, { status: 500 });
+    }
+
+    // If no preferences exist, return default values
+    const defaultPreferences = {
+      businessName: null,
+      businessAddress: null,
+      businessPhone: null,
+      businessEmail: null,
+      tableColor: '#3b82f6',
+      footerThankYouText: null,
+      footerContactInfo: null
+    };
+
+    log.info(`GET /api/receipt-preferences - Retrieved preferences for user: ${userProfile.id}`);
     
     return NextResponse.json({
       ok: true,
-      data: preferences
+      data: preferences || defaultPreferences
     });
 
   } catch (error) {
@@ -49,9 +86,13 @@ export async function PUT(request: NextRequest) {
   try {
     log.info('PUT /api/receipt-preferences - Starting request processing');
 
-    const user = await getUser();
-    if (!user) {
-      log.error('PUT /api/receipt-preferences - Authentication failed');
+    const supabase = await createServerSupabaseClient();
+    
+    // Get current user from Supabase Auth
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      log.error('PUT /api/receipt-preferences - Authentication failed:', authError);
       return NextResponse.json({
         ok: false,
         error: 'Unauthorized',
@@ -59,13 +100,21 @@ export async function PUT(request: NextRequest) {
       }, { status: 401 });
     }
 
-    const userWithTeam = await getUserWithTeam();
-    if (!userWithTeam || !userWithTeam.teamId) {
-      log.error('PUT /api/receipt-preferences - Team not found');
+    log.info(`PUT /api/receipt-preferences - Updating preferences for user: ${user.id}`);
+
+    // Get user profile from database
+    const { data: userProfile, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('auth_user_id', user.id)
+      .single();
+
+    if (userError || !userProfile) {
+      log.error('PUT /api/receipt-preferences - User profile not found:', userError);
       return NextResponse.json({
         ok: false,
-        error: 'Team not found',
-        details: 'Your team information could not be found'
+        error: 'User profile not found',
+        details: 'Your user profile could not be found'
       }, { status: 404 });
     }
 
@@ -140,9 +189,47 @@ export async function PUT(request: NextRequest) {
       footerContactInfo: footerContactInfo === '' ? null : footerContactInfo
     };
 
-    const updatedPreferences = await createOrUpdateReceiptPreferences(userWithTeam.teamId, cleanData);
+    // Check if preferences already exist for this user
+    const { data: existingPreferences } = await supabase
+      .from('receipt_preferences')
+      .select('id')
+      .eq('user_id', userProfile.id)
+      .single();
 
-    log.info(`PUT /api/receipt-preferences - Updated preferences for team ${userWithTeam.teamId}`);
+    let updatedPreferences;
+
+    if (existingPreferences) {
+      // Update existing preferences
+      const { data, error } = await supabase
+        .from('receipt_preferences')
+        .update({
+          ...cleanData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', userProfile.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      updatedPreferences = data;
+    } else {
+      // Create new preferences
+      const { data, error } = await supabase
+        .from('receipt_preferences')
+        .insert({
+          user_id: userProfile.id,
+          ...cleanData,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      updatedPreferences = data;
+    }
+
+    log.info(`PUT /api/receipt-preferences - Updated preferences for user: ${userProfile.id}`);
     
     return NextResponse.json({
       ok: true,

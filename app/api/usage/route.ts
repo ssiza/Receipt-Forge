@@ -1,39 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentMonthUsage, getUser, getUserWithTeam } from '@/lib/db/queries';
+import { createServerSupabaseClient } from '@/lib/supabaseClient';
 import { log } from '@/lib/logger';
-
-async function getAuthenticatedTeam(request: NextRequest) {
-  try {
-    // Get user from Supabase Auth
-    const user = await getUser();
-    if (!user) {
-      console.log('User not authenticated via Supabase');
-      return null;
-    }
-
-    // Get user with team information
-    const userWithTeam = await getUserWithTeam();
-    if (!userWithTeam || !userWithTeam.teamId) {
-      console.log('Team not found for authenticated user');
-      return null;
-    }
-
-    console.log('User authenticated via Supabase:', user.email);
-    return { id: userWithTeam.teamId };
-  } catch (error) {
-    console.error('Error in getAuthenticatedTeam:', error);
-    return null;
-  }
-}
 
 export async function GET(request: NextRequest) {
   try {
     log.info('GET /api/usage - Starting request processing');
     
-    // Get authenticated team
-    const team = await getAuthenticatedTeam(request);
-    if (!team) {
-      log.error('GET /api/usage - Authentication failed');
+    const supabase = await createServerSupabaseClient();
+    
+    // Get current user from Supabase Auth
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      log.error('GET /api/usage - Authentication failed:', authError);
       return NextResponse.json({ 
         ok: false,
         error: 'Unauthorized - Please sign in again',
@@ -41,19 +20,63 @@ export async function GET(request: NextRequest) {
       }, { status: 401 });
     }
 
-    // Get current monthly usage
-    const currentUsage = await getCurrentMonthUsage(team.id);
+    log.info(`GET /api/usage - Getting usage for user: ${user.id}`);
+
+    // Get user profile from database
+    const { data: userProfile, error: userError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('auth_user_id', user.id)
+      .single();
+
+    if (userError || !userProfile) {
+      log.error('GET /api/usage - User profile not found:', userError);
+      return NextResponse.json({ 
+        ok: false,
+        error: 'User profile not found',
+        details: 'Your user profile could not be found'
+      }, { status: 404 });
+    }
+
+    // Get current month and year
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1; // getMonth() returns 0-11
+    const currentYear = now.getFullYear();
+
+    // Get current monthly usage for this user
+    const { data: monthlyUsage, error: usageError } = await supabase
+      .from('monthly_usage')
+      .select('receipt_count')
+      .eq('user_id', userProfile.id)
+      .eq('month', currentMonth)
+      .eq('year', currentYear)
+      .single();
+
+    if (usageError && usageError.code !== 'PGRST116') { // PGRST116 = no rows returned
+      log.error('GET /api/usage - Error fetching usage:', usageError);
+      return NextResponse.json({ 
+        ok: false,
+        error: 'Failed to retrieve usage',
+        details: 'An error occurred while fetching usage data'
+      }, { status: 500 });
+    }
+
+    const currentUsage = monthlyUsage?.receipt_count || 0;
     
-    log.info('GET /api/usage - Retrieved usage for team:', { 
-      teamId: team.id, 
-      currentUsage 
+    log.info('GET /api/usage - Retrieved usage for user:', { 
+      userId: userProfile.id, 
+      currentUsage,
+      month: currentMonth,
+      year: currentYear
     });
     
     return NextResponse.json({ 
       ok: true, 
       data: {
         currentUsage,
-        teamId: team.id
+        userId: userProfile.id,
+        month: currentMonth,
+        year: currentYear
       }
     });
   } catch (error) {
