@@ -77,7 +77,6 @@ export interface ReceiptFormData {
 
 export interface Receipt {
   id: string;
-  teamId: number;
   receiptNumber: string;
   issueDate: string;
   customerName: string;

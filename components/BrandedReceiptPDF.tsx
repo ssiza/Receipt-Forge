@@ -464,7 +464,7 @@ const BrandedReceiptPDF: React.FC<BrandedReceiptPDFProps> = ({
     if (receipt) {
       Object.keys(receipt).forEach(key => {
         if (key && typeof key === 'string' && 
-            !['id', 'teamId', 'receiptNumber', 'issueDate', 'customerName', 
+            !['id', 'receiptNumber', 'issueDate', 'customerName', 
               'customerEmail', 'customerPhone', 'customerAddress', 'items', 
               'subtotal', 'taxAmount', 'totalAmount', 'currency', 'status', 
               'notes', 'businessName', 'businessAddress', 'businessPhone', 
@@ -754,7 +754,7 @@ const BrandedReceiptPDF: React.FC<BrandedReceiptPDFProps> = ({
           {receipt && (() => {
             // Define all known fields that are already displayed elsewhere
             const displayedFields = [
-              'id', 'teamId', 'receiptNumber', 'issueDate', 'customerName', 
+              'id', 'receiptNumber', 'issueDate', 'customerName', 
               'customerEmail', 'customerPhone', 'customerAddress', 'items', 
               'subtotal', 'taxAmount', 'totalAmount', 'currency', 'status', 
               'notes', 'businessName', 'businessAddress', 'businessPhone', 

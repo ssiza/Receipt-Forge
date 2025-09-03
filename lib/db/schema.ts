@@ -1,86 +1,22 @@
-import {
-  pgTable,
-  serial,
-  varchar,
-  text,
-  timestamp,
-  integer,
-  numeric,
-  jsonb,
-  date,
-  uuid,
-  boolean,
-  inet,
-} from 'drizzle-orm/pg-core';
+import { pgTable, serial, varchar, timestamp, text, boolean, jsonb, integer, uuid, date, numeric } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
-export const loginAttempts = pgTable('login_attempts', {
-  id: serial('id').primaryKey(),
-  email: varchar('email', { length: 255 }).notNull(),
-  ip: inet('ip').notNull(),
-  userAgent: text('user_agent'),
-  success: boolean('success').notNull(),
-  attemptedAt: timestamp('attempted_at').notNull().defaultNow(),
-});
-
+// Users table - simplified without team dependencies
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
-  authUserId: uuid('auth_user_id').unique().notNull(), // References auth.users(id)
-  name: varchar('name', { length: 100 }),
-  email: varchar('email', { length: 255 }).notNull().unique(),
-  role: varchar('role', { length: 20 }).notNull().default('member'),
+  authUserId: text('auth_user_id').notNull().unique(),
+  name: varchar('name', { length: 255 }),
+  email: varchar('email', { length: 255 }),
+  role: varchar('role', { length: 50 }).default('user'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
   deletedAt: timestamp('deleted_at'),
 });
 
-
-
-export const teams = pgTable('teams', {
-  id: serial('id').primaryKey(),
-  name: varchar('name', { length: 100 }).notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-  updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
-
-export const teamMembers = pgTable('team_members', {
-  id: serial('id').primaryKey(),
-  userId: uuid('user_id').references(() => users.id).notNull(),
-  teamId: integer('team_id')
-    .notNull()
-    .references(() => teams.id),
-  role: varchar('role', { length: 50 }).notNull(),
-  joinedAt: timestamp('joined_at').notNull().defaultNow(),
-});
-
-export const activityLogs = pgTable('activity_logs', {
-  id: serial('id').primaryKey(),
-  teamId: integer('team_id')
-    .notNull()
-    .references(() => teams.id),
-  userId: uuid('user_id').references(() => users.id),
-  action: text('action').notNull(),
-  timestamp: timestamp('timestamp').notNull().defaultNow(),
-  ipAddress: varchar('ip_address', { length: 45 }),
-});
-
-export const invitations = pgTable('invitations', {
-  id: serial('id').primaryKey(),
-  teamId: integer('team_id')
-    .notNull()
-    .references(() => teams.id),
-  email: varchar('email', { length: 255 }).notNull(),
-  role: varchar('role', { length: 50 }).notNull(),
-  invitedById: uuid('invited_by_id').references(() => users.id),
-  invitedAt: timestamp('invited_at').notNull().defaultNow(),
-  status: varchar('status', { length: 20 }).notNull().default('pending'),
-});
-
+// Receipts table - no team dependencies, only user_id
 export const receipts = pgTable('receipts', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
-  teamId: integer('team_id')
-    .references(() => teams.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   receiptNumber: text('receipt_number').notNull().unique(),
   issueDate: date('issue_date').notNull(),
   customerName: text('customer_name').notNull(),
@@ -109,12 +45,10 @@ export const receipts = pgTable('receipts', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
-// New table for business templates
+// Business templates table - no team dependencies, only user_id
 export const businessTemplates = pgTable('business_templates', {
   id: uuid('id').primaryKey().defaultRandom(),
-  teamId: integer('team_id')
-    .notNull()
-    .references(() => teams.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   name: text('name').notNull(),
   description: text('description'),
   isDefault: boolean('is_default').notNull().default(false),
@@ -124,12 +58,10 @@ export const businessTemplates = pgTable('business_templates', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
-// New table for user receipt preferences
+// Receipt preferences table - no team dependencies, only user_id
 export const receiptPreferences = pgTable('receipt_preferences', {
   id: serial('id').primaryKey(),
-  teamId: integer('team_id')
-    .notNull()
-    .references(() => teams.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   businessName: text('business_name'),
   businessAddress: text('business_address'),
   businessPhone: text('business_phone'),
@@ -142,124 +74,68 @@ export const receiptPreferences = pgTable('receipt_preferences', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
-// New table for monthly usage tracking
+// Monthly usage tracking table - no team dependencies, only user_id
 export const monthlyUsage = pgTable('monthly_usage', {
   id: serial('id').primaryKey(),
-  teamId: integer('team_id')
-    .notNull()
-    .references(() => teams.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   year: integer('year').notNull(),
   month: integer('month').notNull(), // 1-12
   receiptCount: integer('receipt_count').notNull().default(0),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (table) => ({
-  // Composite unique constraint to ensure one record per team per month
-  uniqueTeamMonth: sql`UNIQUE(${table.teamId}, ${table.year}, ${table.month})`
+  // Composite unique constraint to ensure one record per user per month
+  uniqueUserMonth: sql`UNIQUE(${table.userId}, ${table.year}, ${table.month})`
 }));
 
-export const teamsRelations = relations(teams, ({ many, one }) => ({
-  teamMembers: many(teamMembers),
-  activityLogs: many(activityLogs),
-  invitations: many(invitations),
-  receiptPreferences: one(receiptPreferences),
-}));
-
+// Relations - simplified without team dependencies
 export const usersRelations = relations(users, ({ many }) => ({
-  teamMembers: many(teamMembers, { relationName: 'userTeamMembers' }),
-  invitationsSent: many(invitations, { relationName: 'userInvitationsSent' }),
-}));
-
-export const invitationsRelations = relations(invitations, ({ one }) => ({
-  team: one(teams, {
-    fields: [invitations.teamId],
-    references: [teams.id],
-  }),
-  invitedBy: one(users, {
-    fields: [invitations.invitedById],
-    references: [users.id],
-  }),
-}));
-
-export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
-  user: one(users, {
-    fields: [teamMembers.userId],
-    references: [users.id],
-  }),
-  team: one(teams, {
-    fields: [teamMembers.teamId],
-    references: [teams.id],
-  }),
-}));
-
-export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
-  team: one(teams, {
-    fields: [activityLogs.teamId],
-    references: [teams.id],
-  }),
-  user: one(users, {
-    fields: [activityLogs.userId],
-    references: [users.id],
-  }),
+  receipts: many(receipts),
+  businessTemplates: many(businessTemplates),
+  receiptPreferences: many(receiptPreferences),
+  monthlyUsage: many(monthlyUsage),
 }));
 
 export const receiptsRelations = relations(receipts, ({ one }) => ({
-  team: one(teams, {
-    fields: [receipts.teamId],
-    references: [teams.id],
+  user: one(users, {
+    fields: [receipts.userId],
+    references: [users.id],
   }),
-
 }));
 
 export const businessTemplatesRelations = relations(businessTemplates, ({ one }) => ({
-  team: one(teams, {
-    fields: [businessTemplates.teamId],
-    references: [teams.id],
+  user: one(users, {
+    fields: [businessTemplates.userId],
+    references: [users.id],
   }),
 }));
 
 export const receiptPreferencesRelations = relations(receiptPreferences, ({ one }) => ({
-  team: one(teams, {
-    fields: [receiptPreferences.teamId],
-    references: [teams.id],
+  user: one(users, {
+    fields: [receiptPreferences.userId],
+    references: [users.id],
   }),
 }));
 
+export const monthlyUsageRelations = relations(monthlyUsage, ({ one }) => ({
+  user: one(users, {
+    fields: [monthlyUsage.userId],
+    references: [users.id],
+  }),
+}));
+
+// Type exports
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
-export type Team = typeof teams.$inferSelect;
-export type NewTeam = typeof teams.$inferInsert;
-export type TeamMember = typeof teamMembers.$inferSelect;
-export type NewTeamMember = typeof teamMembers.$inferInsert;
-export type ActivityLog = typeof activityLogs.$inferSelect;
-export type NewActivityLog = typeof activityLogs.$inferInsert;
-export type Invitation = typeof invitations.$inferSelect;
-export type NewInvitation = typeof invitations.$inferInsert;
+
 export type Receipt = typeof receipts.$inferSelect;
 export type NewReceipt = typeof receipts.$inferInsert;
+
 export type BusinessTemplate = typeof businessTemplates.$inferSelect;
 export type NewBusinessTemplate = typeof businessTemplates.$inferInsert;
+
+export type ReceiptPreferences = typeof receiptPreferences.$inferSelect;
+export type NewReceiptPreferences = typeof receiptPreferences.$inferInsert;
+
 export type MonthlyUsage = typeof monthlyUsage.$inferSelect;
 export type NewMonthlyUsage = typeof monthlyUsage.$inferInsert;
-export type LoginAttempt = typeof loginAttempts.$inferSelect;
-export type NewLoginAttempt = typeof loginAttempts.$inferInsert;
-
-export type TeamDataWithMembers = Team & {
-  teamMembers: (TeamMember & {
-    user: Pick<User, 'id' | 'name' | 'email'>;
-  })[];
-  user: Pick<User, 'id' | 'name' | 'email'>;
-};
-
-export enum ActivityType {
-  SIGN_UP = 'SIGN_UP',
-  SIGN_IN = 'SIGN_IN',
-  SIGN_OUT = 'SIGN_OUT',
-  UPDATE_PASSWORD = 'UPDATE_PASSWORD',
-  DELETE_ACCOUNT = 'DELETE_ACCOUNT',
-  UPDATE_ACCOUNT = 'UPDATE_ACCOUNT',
-  CREATE_TEAM = 'CREATE_TEAM',
-  REMOVE_TEAM_MEMBER = 'REMOVE_TEAM_MEMBER',
-  INVITE_TEAM_MEMBER = 'INVITE_TEAM_MEMBER',
-  ACCEPT_INVITATION = 'ACCEPT_INVITATION',
-}
