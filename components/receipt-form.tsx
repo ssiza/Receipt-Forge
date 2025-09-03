@@ -122,25 +122,35 @@ export function ReceiptForm({
   disabled = false
 }: ReceiptFormProps) {
   const [formData, setFormData] = useState<ReceiptFormData>(() => {
+    const now = new Date();
+    const defaultDueDate = new Date();
+    defaultDueDate.setDate(now.getDate() + 30); // Default to 30 days from now
+    
     const baseData: ReceiptFormData = {
-      issueDate: new Date().toISOString().split('T')[0],
+      issueDate: now.toISOString().split('T')[0],
       customerName: '',
       customerEmail: '',
       customerPhone: '',
       customerAddress: '',
-      items: [{ id: '1', description: '', quantity: 1, unitPrice: 0, totalPrice: 0 }],
+      items: [{
+        id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        description: '',
+        quantity: 1,
+        unitPrice: 0,
+        totalPrice: 0
+      }],
       subtotal: 0,
       taxAmount: 0,
       totalAmount: 0,
       currency: 'USD',
-      status: 'paid',
+      status: 'draft',
       notes: '',
       businessName: '',
       businessAddress: '',
       businessPhone: '',
       businessEmail: '',
-      dueDate: '',
-      paymentTerms: '',
+      dueDate: defaultDueDate.toISOString().split('T')[0],
+      paymentTerms: 'Net 30',
       reference: '',
       itemAdditionalFields: [],
     };

@@ -1,18 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabaseClient';
-import { createClient, type User as SupabaseUser } from '@supabase/supabase-js';
 import { log } from '@/lib/logger';
 
-// Define types for our database tables
 type LoginAttempt = {
-  id?: number;
   email: string;
   ip: string;
   user_agent: string | null;
   success: boolean;
   attempted_at: string;
-  created_at?: string;
-  updated_at?: string;
 };
 
 type UserProfile = {
@@ -21,17 +16,23 @@ type UserProfile = {
   name: string | null;
   role: string;
   auth_user_id: string;
-  created_at?: string;
-  updated_at?: string;
 };
 
 interface AuthResponse {
   data: {
-    user: SupabaseUser | null;
+    user: {
+      id: string;
+      email: string;
+      user_metadata?: {
+        name?: string;
+      };
+    } | null;
     session: any | null;
   };
   error: any;
 }
+
+// Rate limiting and security settings
 
 // Simple in-memory rate limiting for development
 // In production, you should use a proper rate limiting solution like Upstash Redis
@@ -162,13 +163,10 @@ export async function POST(request: NextRequest) {
         attempted_at: new Date().toISOString()
       };
 
-      const { error: logError } = await supabase
+      await supabase
         .from('login_attempts')
         .insert(loginAttempt);
-
-      if (logError) {
-        log.error('Failed to log login attempt:', logError);
-      }
+        
     } catch (error) {
       log.error('Failed to log login attempt:', error);
       // Don't fail the login if logging fails
@@ -205,6 +203,7 @@ export async function POST(request: NextRequest) {
     log.info(`Fetching profile from database for user: ${data.user.id}`);
     
     try {
+      // Get the user's profile with their legacy ID
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('*')
@@ -212,7 +211,21 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (userError || !userData) {
-        throw new Error(userError?.message || 'User profile not found');
+        log.error('User profile not found in database', { 
+          authUserId: data.user.id,
+          error: userError
+        });
+        
+        // Sign out the user since we can't find their profile
+        await supabase.auth.signOut();
+        
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: 'User profile not found. Please contact support.' 
+          },
+          { status: 404 }
+        );
       }
 
       const user = userData as UserProfile;
@@ -220,21 +233,19 @@ export async function POST(request: NextRequest) {
 
       // Update the most recent login attempt to success
       try {
-        const { error: updateError } = await supabase
+        await supabase
           .from('login_attempts')
           .update({ success: true })
           .eq('email', email)
           .order('attempted_at', { ascending: false })
           .limit(1);
-
-        if (updateError) {
-          log.error('Failed to update login attempt to success:', updateError);
-        }
       } catch (updateError) {
         log.error('Error updating login attempt:', updateError);
+        // Non-critical error, continue
       }
 
-      return NextResponse.json({
+      // Set a secure HTTP-only cookie with the legacy user ID
+      const response = NextResponse.json({
         success: true,
         user: {
           id: user.id,
@@ -243,14 +254,27 @@ export async function POST(request: NextRequest) {
           role: user.role
         }
       });
+
+      // Set a secure, HTTP-only cookie with the legacy user ID
+      // This ensures compatibility with existing code that expects the legacy ID
+      response.cookies.set({
+        name: 'legacy_user_id',
+        value: user.id,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+      });
+
+      return response;
     } catch (error) {
-      log.error('Error fetching user profile:', error);
+      log.error('Error during login process:', error);
       return NextResponse.json(
         { 
           success: false, 
-          error: 'User profile not found in database. Please contact support.' 
+          error: 'An error occurred during login. Please try again.' 
         },
-        { status: 404 }
+        { status: 500 }
       );
     }
 

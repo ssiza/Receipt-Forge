@@ -162,9 +162,17 @@ function ReceiptsPageContent() {
       const url = editingReceipt ? `/api/receipts/${editingReceipt.id}` : '/api/receipts';
       const method = editingReceipt ? 'PUT' : 'POST';
       
-      // Clean up form data - convert empty strings to null for optional fields
+      // Ensure all required fields are present and properly formatted
       const cleanedFormData = {
-        ...formData,
+        // Required fields
+        customerName: formData.customerName || '',
+        issueDate: formData.issueDate || new Date().toISOString(),
+        status: formData.status || 'draft',
+        currency: formData.currency || 'USD',
+        taxAmount: parseFloat(formData.taxAmount) || 0,
+        totalAmount: parseFloat(formData.totalAmount) || 0,
+        
+        // Optional fields with null fallback
         customerEmail: formData.customerEmail || null,
         customerPhone: formData.customerPhone || null,
         customerAddress: formData.customerAddress || null,
@@ -173,10 +181,19 @@ function ReceiptsPageContent() {
         businessAddress: formData.businessAddress || null,
         businessPhone: formData.businessPhone || null,
         businessEmail: formData.businessEmail || null,
-        dueDate: formData.dueDate || null,
+        dueDate: formData.dueDate ? new Date(formData.dueDate).toISOString() : null,
         paymentTerms: formData.paymentTerms || null,
         reference: formData.reference || null,
         itemAdditionalFields: formData.itemAdditionalFields || null,
+        
+        // Ensure items array is properly formatted
+        items: (formData.items || []).map((item: any) => ({
+          description: item.description || '',
+          quantity: parseFloat(item.quantity) || 0,
+          unitPrice: parseFloat(item.unitPrice) || 0,
+          totalPrice: parseFloat(item.totalPrice) || 0,
+          ...(item.id && { id: item.id })
+        }))
       };
       
       console.log('Making request:', { url, method, cleanedFormData });

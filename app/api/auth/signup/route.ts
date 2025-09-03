@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient, createAdminSupabaseClient } from '@/lib/supabaseClient';
-import { db } from '@/lib/db/drizzle';
-import { users } from '@/lib/db/schema';
 import { log } from '@/lib/logger';
-import { eq } from 'drizzle-orm';
+
+type UserProfile = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  auth_user_id: string;
+  created_at?: string;
+  updated_at?: string;
+};
 
 // Validate email format
 const isValidEmail = (email: string): boolean => {
@@ -59,24 +66,30 @@ export async function POST(request: NextRequest) {
     log.info(`Starting signup process for email: ${email}`);
     const supabase = await createServerSupabaseClient();
 
-    // Check if user already exists
-    const { data: { user: existingUser } } = await supabase.auth.getUser();
-    if (existingUser) {
-      log.warn(`Signup attempt for already authenticated user: ${existingUser.id}`);
+    // Check if user is already authenticated
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (currentUser) {
+      log.warn(`Signup attempt for already authenticated user: ${currentUser.id}`);
       return NextResponse.json(
         { success: false, error: 'You are already signed in' },
         { status: 400 }
       );
     }
 
-    // Check if email already exists
-    const { data: existingProfile } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .single();
+    // Check if email already exists in Supabase Auth
+    const { data: existingUsers, error: authCheckError } = await supabase
+      .auth.admin.listUsers();
 
-    if (existingProfile) {
+    if (authCheckError) {
+      log.error('Error checking existing users:', authCheckError);
+      return NextResponse.json(
+        { success: false, error: 'Error checking existing accounts' },
+        { status: 500 }
+      );
+    }
+
+    const userExists = existingUsers?.users?.some(user => user.email === email);
+    if (userExists) {
       log.warn(`Signup attempt with existing email: ${email}`);
       return NextResponse.json(
         { success: false, error: 'An account with this email already exists' },
@@ -113,28 +126,29 @@ export async function POST(request: NextRequest) {
 
     log.info(`Supabase Auth user created successfully for ${email} with ID: ${data.user.id}`);
 
-    // Create user profile in database
+    // Create user profile in database using Supabase
     try {
       log.info(`Creating profile in database for user: ${data.user.id}`);
       
-      if (!db) {
-        log.error('Database connection not available');
-        return NextResponse.json(
-          { success: false, error: 'Database connection not available. Please try again.' },
-          { status: 500 }
-        );
-      }
-      
       const newUser = {
-        authUserId: data.user.id,
+        auth_user_id: data.user.id,
         email: data.user.email!,
         name: name || null,
         role: 'owner',
-        createdAt: new Date(),
-        updatedAt: new Date()
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       };
 
-      const [createdUser] = await db.insert(users).values(newUser).returning();
+      // Insert the new user into the users table
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .insert(newUser)
+        .select()
+        .single();
+
+      if (userError) throw userError;
+      
+      const createdUser = userData as UserProfile;
       log.info(`Profile created successfully in database for user: ${data.user.id}`);
 
       // Send verification email if email confirmation is enabled
