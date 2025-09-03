@@ -3,28 +3,12 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import { Receipt } from '@/lib/types/receipt';
 import { ReceiptPreferences } from './receipt-template';
 import { log } from './logger';
-import { getBusinessTemplateById, getDefaultBusinessTemplate, getReceiptPreferences } from './db/queries';
 import BrandedReceiptPDF from '@/components/BrandedReceiptPDF';
 
 export async function generateReceiptPDF(receipt: Receipt, preferences?: ReceiptPreferences): Promise<Buffer> {
   try {
     log.info(`Generating PDF for receipt ${receipt.receiptNumber}`);
     
-    // Get receipt preferences if not provided
-    if (!preferences) {
-      const dbPreferences = await getReceiptPreferences(receipt.teamId);
-      if (dbPreferences) {
-        preferences = {
-          businessName: dbPreferences.businessName || undefined,
-          businessAddress: dbPreferences.businessAddress || undefined,
-          logoUrl: dbPreferences.logoUrl || undefined,
-          tableColor: dbPreferences.tableColor || undefined,
-          footerThankYouText: dbPreferences.footerThankYouText || undefined,
-          footerContactInfo: dbPreferences.footerContactInfo || undefined,
-        };
-      }
-    }
-
     // Use receipt's business info if available, otherwise fall back to preferences
     const businessName = receipt.businessName || preferences?.businessName;
     const businessAddress = receipt.businessAddress || preferences?.businessAddress;
